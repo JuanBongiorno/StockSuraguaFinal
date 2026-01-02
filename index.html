@@ -69,7 +69,6 @@
                     <option value="planta">Planta</option>
                     <option value="mauro">Mauro</option>
                     <option value="javier">Javier</option>
-                    <option value="facundo">Facundo</option>
                     <option value="admin">Administrador</option>
                 </select>
             </div>
@@ -202,11 +201,11 @@
             planta: "planta3876", 
             admin: "admin3876",
             mauro: "suragua123",
-            javier: "suragua159",
-            facundo: "suragua3876"
+            javier: "suragua159"
         };
 
-        const restrictedUsers = ['mauro', 'javier', 'facundo'];
+        // Usuarios con acceso al panel de taller
+        const restrictedUsers = ['mauro', 'javier', 'taller'];
 
         window.login = () => {
             const u = document.getElementById('usernameInput').value;
@@ -219,7 +218,7 @@
                 if(u === 'admin') { 
                     document.getElementById('adminScreen').style.display = 'flex'; 
                     loadAdminHistory(); 
-                } else if(u === 'taller' || restrictedUsers.includes(u)) { 
+                } else if(restrictedUsers.includes(u)) { 
                     document.getElementById('tallerMenuScreen').style.display = 'flex'; 
                 } else {
                     showDashboard();
@@ -235,8 +234,7 @@
             
             const operatorInput = document.getElementById('reportOperator');
             
-            // LÓGICA DE AUTOCOMPLETADO Y BLOQUEO
-            if (restrictedUsers.includes(currentUser)) {
+            if (['mauro', 'javier'].includes(currentUser)) {
                 operatorInput.value = currentUser.charAt(0).toUpperCase() + currentUser.slice(1);
                 operatorInput.readOnly = true;
                 operatorInput.parentElement.style.opacity = "0.7";
@@ -254,6 +252,7 @@
             document.getElementById('adminScreen').style.display = 'none';
             document.getElementById('dashboardScreen').style.display = 'block';
             
+            // Solo admin/oficina/planta pueden añadir nuevos productos
             if(restrictedUsers.includes(currentUser)) {
                 document.getElementById('btnContainerAdd').style.display = 'none';
             } else {
@@ -267,7 +266,7 @@
             document.getElementById('tallerFormScreen').style.display = 'none';
             document.getElementById('dashboardScreen').style.display = 'none';
             if(currentUser === 'admin') document.getElementById('adminScreen').style.display = 'flex';
-            else if(currentUser === 'taller' || restrictedUsers.includes(currentUser)) document.getElementById('tallerMenuScreen').style.display = 'flex';
+            else if(restrictedUsers.includes(currentUser)) document.getElementById('tallerMenuScreen').style.display = 'flex';
         };
 
         function updateTime() {
@@ -366,9 +365,22 @@
                     timestamp: Date.now() 
                 });
 
+                // 1. SUMAR +1 A LA MÁQUINA REPARADA SELECCIONADA
                 let mId = Object.keys(globalItems).find(id => globalItems[id].name === mc);
                 if(mId) await update(ref(db, `items/${mId}`), { qty: globalItems[mId].qty + 1 });
 
+                // 2. RESTAR -1 A "Dispenser a reparar" (Lógica automática de taller)
+                if (restrictedUsers.includes(currentUser)) {
+                    let repairId = Object.keys(globalItems).find(id => 
+                        globalItems[id].name.trim().toLowerCase() === "dispenser a reparar"
+                    );
+                    if (repairId) {
+                        const currentRepairQty = globalItems[repairId].qty || 0;
+                        await update(ref(db, `items/${repairId}`), { qty: Math.max(0, currentRepairQty - 1) });
+                    }
+                }
+
+                // 3. RESTAR REPUESTOS UTILIZADOS
                 for(let id in selectedRepuestos) {
                     if(globalItems[id]) {
                         const newStock = Math.max(0, globalItems[id].qty - selectedRepuestos[id].qty);
@@ -383,8 +395,7 @@
         };
 
         function resetForm() {
-            // No borramos el operario si es usuario restringido
-            if (!restrictedUsers.includes(currentUser)) {
+            if (!['mauro', 'javier'].includes(currentUser)) {
                 document.getElementById('reportOperator').value = '';
             }
             document.getElementById('reportMachineType').value = '';
@@ -438,12 +449,11 @@
                 if (filterValue) {
                     reportData = reportData.filter(r => r.operator.toLowerCase().includes(filterValue));
                 }
-                if(reportData.length === 0) return alert("No se encontraron registros para este operario");
                 const data = reportData.map(r => ({ Fecha: r.date, Operario: r.operator, Máquina: r.machine, Actividad: r.activity, Repuestos: r.repuestos, Observaciones: r.observations }));
                 const ws = XLSX.utils.json_to_sheet(data); 
                 const wb = XLSX.utils.book_new(); 
                 XLSX.utils.book_append_sheet(wb, ws, "Taller");
-                const fileName = filterValue ? `Reporte_Taller_${filterValue.toUpperCase()}_${new Date().toLocaleDateString()}.xlsx` : `Reporte_Taller_GENERAL_${new Date().toLocaleDateString()}.xlsx`;
+                const fileName = `Reporte_Taller_${new Date().toLocaleDateString()}.xlsx`;
                 XLSX.writeFile(wb, fileName);
             });
         };
@@ -459,17 +469,31 @@
 
         function renderItem(id, item) {
             const isDisp = item.type === 'dispenser';
-            const isRestricted = restrictedUsers.includes(currentUser);
+            const isRepairItem = item.name.trim().toLowerCase() === "dispenser a reparar";
+            
             const card = document.createElement('div'); card.className = 'col-md-4 item-card-wrapper';
             card.setAttribute('data-name', item.name.toLowerCase());
             
-            const controlsHtml = isRestricted ? 
-                `<span class="fs-4 fw-bold w-100 text-center">${item.qty}</span>` :
+            // Lógica de permisos solicitada:
+            // 1. Si el usuario es 'mauro' o 'javier', NO puede modificar NADA (canEdit = false).
+            // 2. Si el usuario es 'taller', SOLO puede modificar "dispenser a reparar".
+            // 3. Otros usuarios (admin, oficina, planta) pueden modificar todo.
+            
+            let canEdit = true;
+            if (currentUser === 'mauro' || currentUser === 'javier') {
+                canEdit = false;
+            } else if (currentUser === 'taller') {
+                canEdit = isRepairItem;
+            }
+
+            const controlsHtml = canEdit ? 
                 `<button class="btn btn-circle btn-outline-danger shadow-sm" onclick="updateStock('${id}', ${item.qty}, -1, '${item.name}')">-</button>
                  <span class="fs-4 fw-bold">${item.qty}</span>
-                 <button class="btn btn-circle btn-outline-success shadow-sm" onclick="updateStock('${id}', ${item.qty}, 1, '${item.name}')">+</button>`;
+                 <button class="btn btn-circle btn-outline-success shadow-sm" onclick="updateStock('${id}', ${item.qty}, 1, '${item.name}')">+</button>` :
+                `<span class="fs-4 fw-bold w-100 text-center">${item.qty}</span>`;
 
-            const deleteHtml = isRestricted ? '' : `<button onclick="deleteItem('${id}', '${item.name}')" class="btn text-danger btn-sm p-0"><i class="bi bi-trash"></i></button>`;
+            // El botón de borrar solo para usuarios no restringidos
+            const deleteHtml = restrictedUsers.includes(currentUser) ? '' : `<button onclick="deleteItem('${id}', '${item.name}')" class="btn text-danger btn-sm p-0"><i class="bi bi-trash"></i></button>`;
 
             card.innerHTML = `
                 <div class="glass-panel stock-card ${isDisp?'':'repuesto'} shadow-sm">
@@ -485,7 +509,12 @@
         }
 
         window.updateStock = (id, cur, amt, name) => {
-            if(restrictedUsers.includes(currentUser)) return;
+            const isRepairItem = name.trim().toLowerCase() === "dispenser a reparar";
+            
+            // Bloqueo estricto por función
+            if (currentUser === 'mauro' || currentUser === 'javier') return;
+            if (currentUser === 'taller' && !isRepairItem) return;
+            
             if(cur + amt < 0) return;
             update(ref(db, `items/${id}`), { qty: cur + amt });
             push(ref(db, 'history'), { 
