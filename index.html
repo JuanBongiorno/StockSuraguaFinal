@@ -35,16 +35,16 @@
         .chat-tabs { display: flex; background: #f8f9fa; border-radius: 15px 15px 0 0; border-bottom: 1px solid #ddd; }
         .chat-tab { flex: 1; padding: 10px; text-align: center; cursor: pointer; font-size: 0.8rem; font-weight: 600; color: #666; position: relative; }
         .chat-tab.active { background: white; color: #007bff; border-bottom: 2px solid #007bff; }
-        #chat-box-messages { height: 300px; overflow-y: auto; display: flex; flex-direction: column; padding: 10px; }
-        .chat-msg { margin-bottom: 8px; padding: 8px 12px; border-radius: 12px; background: #f1f1f1; font-size: 0.82rem; }
+        #chat-box-messages { height: 300px; overflow-y: auto; display: flex; flex-direction: column; padding: 10px; background: #fff; }
+        .chat-msg { margin-bottom: 8px; padding: 8px 12px; border-radius: 12px; background: #f1f1f1; font-size: 0.82rem; word-wrap: break-word; }
         .chat-msg b { color: #007bff; display: block; font-size: 0.72rem; }
         .chat-msg.pedido-log { background: #fff4e5; border-left: 3px solid #ffa000; }
         #chat-input-area { display: flex; background: white; border-radius: 0 0 15px 15px; border-top: 1px solid #ddd; padding: 8px; }
         #chat-toggle { width: 100%; border-radius: 20px; font-weight: bold; margin-top: 5px; position: relative; }
 
-        /* Estilo Notificaciones */
+        /* Badge de Notificación WhatsApp Style */
         .badge-notif { position: absolute; top: -5px; right: -5px; background: #ff3b30; color: white; border-radius: 50%; padding: 2px 6px; font-size: 0.7rem; min-width: 18px; text-align: center; display: none; border: 2px solid white; font-weight: bold; }
-        .chat-tab .badge-notif { top: 2px; right: 5px; }
+        .chat-tab .badge-notif { top: 2px; right: 5px; position: absolute; }
 
         /* Alerta de Pedidos */
         #pedido-alert-container { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); width: 90%; max-width: 600px; z-index: 2000; display: none; }
@@ -311,45 +311,48 @@
 
         // --- NOTIFICACIONES (WHATSAPP STYLE) ---
         function initNotifListeners() {
-            // Escucha Global
             onValue(ref(db, 'chat'), (snap) => {
                 const data = snap.val(); if(!data) return;
                 const lastRead = parseInt(localStorage.getItem(`lastRead_global_${currentUser}`)) || 0;
                 let count = 0;
-                Object.values(data).forEach(m => {
-                    if(m.timestamp > lastRead && m.user !== currentUser.toUpperCase()) count++;
+                Object.values(data).forEach(m => { 
+                    if(m.timestamp > lastRead && m.user !== currentUser.toUpperCase()) count++; 
                 });
-                updateNotifBadge('global', count);
+                updateBadgeUI('global', count);
             });
-            // Escucha Pedidos
             onValue(ref(db, 'pedidos_chat'), (snap) => {
                 const data = snap.val(); if(!data) return;
                 const lastRead = parseInt(localStorage.getItem(`lastRead_pedidos_${currentUser}`)) || 0;
                 let count = 0;
-                Object.values(data).forEach(m => {
-                    if(m.timestamp > lastRead && m.user !== currentUser.toUpperCase()) count++;
+                Object.values(data).forEach(m => { 
+                    if(m.timestamp > lastRead && m.user !== currentUser.toUpperCase()) count++; 
                 });
-                updateNotifBadge('pedidos', count);
+                updateBadgeUI('pedidos', count);
             });
         }
 
-        function updateNotifBadge(type, count) {
-            const badge = document.getElementById(`count-${type}`);
-            if(count > 0) { badge.innerText = count; badge.style.display = 'block'; }
-            else badge.style.display = 'none';
+        function updateBadgeUI(type, count) {
+            const el = document.getElementById(`count-${type}`);
+            if(count > 0) { el.innerText = count; el.style.display = 'block'; }
+            else el.style.display = 'none';
 
-            const gCount = document.getElementById('count-global').style.display === 'block' ? parseInt(document.getElementById('count-global').innerText) : 0;
-            const pCount = document.getElementById('count-pedidos').style.display === 'block' ? parseInt(document.getElementById('count-pedidos').innerText) : 0;
-            const total = gCount + pCount;
-            const totalBadge = document.getElementById('count-total');
-            if(total > 0) { totalBadge.innerText = total; totalBadge.style.display = 'block'; }
-            else totalBadge.style.display = 'none';
+            const g = (document.getElementById('count-global').style.display === 'block') ? parseInt(document.getElementById('count-global').innerText) : 0;
+            const p = (document.getElementById('count-pedidos').style.display === 'block') ? parseInt(document.getElementById('count-pedidos').innerText) : 0;
+            
+            const total = g + p;
+            const totalEl = document.getElementById('count-total');
+            if(total > 0) { totalEl.innerText = total; totalEl.style.display = 'block'; }
+            else totalEl.style.display = 'none';
         }
 
-        // --- CHAT DUAL ---
+        // --- CHAT LOGIC ---
         window.switchChat = (tab) => {
             currentChatTab = tab;
-            localStorage.setItem(`lastRead_${tab}_${currentUser}`, Date.now());
+            // Al cambiar, marcamos como leído inmediatamente
+            const now = Date.now();
+            localStorage.setItem(`lastRead_${tab}_${currentUser}`, now);
+            updateBadgeUI(tab, 0); // Forzar borrado visual del badge
+
             document.querySelectorAll('.chat-tab').forEach(t => t.classList.remove('active'));
             document.getElementById('tab-' + tab).classList.add('active');
             initChatListener();
@@ -358,8 +361,10 @@
         function initChatListener() {
             if(unsubChat) unsubChat();
             const path = currentChatTab === 'global' ? 'chat' : 'pedidos_chat';
-            unsubChat = onValue(query(ref(db, path), limitToLast(30)), (snap) => {
-                const box = document.getElementById('chat-box-messages'); box.innerHTML = '';
+            // Listener principal de mensajes
+            unsubChat = onValue(query(ref(db, path), limitToLast(40)), (snap) => {
+                const box = document.getElementById('chat-box-messages'); 
+                box.innerHTML = '';
                 const data = snap.val();
                 if(data) {
                     Object.values(data).sort((a,b) => a.timestamp - b.timestamp).forEach(m => {
@@ -368,6 +373,8 @@
                     });
                 }
                 box.scrollTop = box.scrollHeight;
+                
+                // Si la ventana está abierta en esta pestaña, actualizar el "leído" constantemente
                 if(document.getElementById('chat-window').style.display === 'flex') {
                     localStorage.setItem(`lastRead_${currentChatTab}_${currentUser}`, Date.now());
                 }
@@ -378,23 +385,26 @@
             const input = document.getElementById('chat-input'); const txt = input.value.trim(); if(!txt) return;
             const path = currentChatTab === 'global' ? 'chat' : 'pedidos_chat';
             const now = Date.now();
-            localStorage.setItem(`lastRead_${currentChatTab}_${currentUser}`, now + 500); // Marcar como leido para uno mismo
+            // Evitar que el propio mensaje genere notificación al emisor
+            localStorage.setItem(`lastRead_${currentChatTab}_${currentUser}`, now + 500); 
             await push(ref(db, path), { user: currentUser.toUpperCase(), text: txt, timestamp: now });
             input.value = '';
         };
 
         window.toggleChat = () => {
             const w = document.getElementById('chat-window');
-            w.style.display = w.style.display === 'flex' ? 'none' : 'flex';
-            if(w.style.display === 'flex') {
+            const isOpening = w.style.display !== 'flex';
+            w.style.display = isOpening ? 'flex' : 'none';
+            if(isOpening) {
                 localStorage.setItem(`lastRead_${currentChatTab}_${currentUser}`, Date.now());
+                updateBadgeUI(currentChatTab, 0);
                 initChatListener();
             }
         };
 
         // --- PEDIDOS ---
         function listenForPedidos() {
-            if(!notifyUsers.includes(currentUser) && currentUser !== 'oficina') return;
+            if(['oficina', 'admin', 'planta'].includes(currentUser)) return;
             unsubAlerts = onValue(query(ref(db, 'pedidos_diarios'), limitToLast(1)), (snap) => {
                 const data = snap.val();
                 if(data) {
@@ -407,30 +417,16 @@
             });
         }
 
-        function showOficinaMenu() {
-            document.getElementById('mainMenuScreen').style.display = 'flex';
-            renderMenuOptions('oficina');
-        }
-
-        function showPlantaScreen() {
-            document.getElementById('mainMenuScreen').style.display = 'none';
-            document.getElementById('plantaScreen').style.display = 'flex';
-            loadPedidosPlanta();
-        }
+        function showOficinaMenu() { document.getElementById('mainMenuScreen').style.display = 'flex'; renderMenuOptions('oficina'); }
+        function showPlantaScreen() { document.getElementById('mainMenuScreen').style.display = 'none'; document.getElementById('plantaScreen').style.display = 'flex'; loadPedidosPlanta(); }
 
         function renderMenuOptions(role) {
             const container = document.getElementById('menuOptions');
             container.innerHTML = '';
             if(role === 'oficina') {
-                container.innerHTML = `
-                    <div class="col-md-4"><div class="glass-panel menu-card" onclick="showDashboard()"><i class="bi bi-eye menu-icon"></i><h4>Stock (Ver)</h4></div></div>
-                    <div class="col-md-4"><div class="glass-panel menu-card" onclick="showPedidoOficinaForm()"><i class="bi bi-cart-plus menu-icon text-success"></i><h4>Pedido Diario</h4></div></div>
-                `;
+                container.innerHTML = `<div class="col-md-4"><div class="glass-panel menu-card" onclick="showDashboard()"><i class="bi bi-eye menu-icon"></i><h4>Stock (Ver)</h4></div></div><div class="col-md-4"><div class="glass-panel menu-card" onclick="showPedidoOficinaForm()"><i class="bi bi-cart-plus menu-icon text-success"></i><h4>Pedido Diario</h4></div></div>`;
             } else if(role === 'taller') {
-                container.innerHTML = `
-                    <div class="col-md-4"><div class="glass-panel menu-card" onclick="showDailyForm()"><i class="bi bi-pencil-square menu-icon"></i><h4>Carga Diaria</h4></div></div>
-                    <div class="col-md-4"><div class="glass-panel menu-card" onclick="showDashboard()"><i class="bi bi-boxes menu-icon text-success"></i><h4>Control Stock</h4></div></div>
-                `;
+                container.innerHTML = `<div class="col-md-4"><div class="glass-panel menu-card" onclick="showDailyForm()"><i class="bi bi-pencil-square menu-icon"></i><h4>Carga Diaria</h4></div></div><div class="col-md-4"><div class="glass-panel menu-card" onclick="showDashboard()"><i class="bi bi-boxes menu-icon text-success"></i><h4>Control Stock</h4></div></div>`;
             }
         }
 
@@ -441,26 +437,14 @@
         };
 
         function loadPedidoItems() {
-            const cont = document.getElementById('pedidoMaquinasList');
-            cont.innerHTML = '';
+            const cont = document.getElementById('pedidoMaquinasList'); cont.innerHTML = '';
             onValue(ref(db, 'items'), (snap) => {
-                const data = snap.val();
-                if(!data) return;
+                const data = snap.val(); if(!data) return;
                 Object.keys(data).forEach(id => {
-                    const item = data[id];
-                    if(item.type === 'dispenser') {
-                        const d = document.createElement('div');
-                        d.className = `repuesto-selector`;
-                        d.id = `ped-${id}`;
-                        const currentQty = selectedPedidosOficina[id] ? selectedPedidosOficina[id].qty : 0;
-                        d.innerHTML = `
-                            <span class="rep-name">${item.name}</span>
-                            <div class="rep-controls">
-                                <button class="btn-qty" onclick="changePedidoQty('${id}', '${item.name}', -1)">-</button>
-                                <span class="rep-qty" id="ped-qty-${id}">${currentQty}</span>
-                                <button class="btn-qty" onclick="changePedidoQty('${id}', '${item.name}', 1)">+</button>
-                            </div>
-                        `;
+                    if(data[id].type === 'dispenser') {
+                        const d = document.createElement('div'); d.className = `repuesto-selector`; d.id = `ped-${id}`;
+                        const cur = selectedPedidosOficina[id] ? selectedPedidosOficina[id].qty : 0;
+                        d.innerHTML = `<span class="rep-name">${data[id].name}</span><div class="rep-controls"><button class="btn-qty" onclick="changePedidoQty('${id}', '${data[id].name}', -1)">-</button><span class="rep-qty" id="ped-qty-${id}">${cur}</span><button class="btn-qty" onclick="changePedidoQty('${id}', '${data[id].name}', 1)">+</button></div>`;
                         cont.appendChild(d);
                     }
                 });
@@ -469,44 +453,28 @@
 
         window.changePedidoQty = (id, name, delta) => {
             if(!selectedPedidosOficina[id]) selectedPedidosOficina[id] = { name, qty: 0 };
-            selectedPedidosOficina[id].qty += delta;
-            if(selectedPedidosOficina[id].qty <= 0) {
-                delete selectedPedidosOficina[id];
-                document.getElementById(`ped-qty-${id}`).innerText = '0';
-                document.getElementById(`ped-${id}`).classList.remove('active');
-            } else {
-                document.getElementById(`ped-qty-${id}`).innerText = selectedPedidosOficina[id].qty;
-                document.getElementById(`ped-${id}`).classList.add('active');
-            }
+            selectedPedidosOficina[id].qty = Math.max(0, selectedPedidosOficina[id].qty + delta);
+            document.getElementById(`ped-qty-${id}`).innerText = selectedPedidosOficina[id].qty;
+            document.getElementById(`ped-${id}`).classList.toggle('active', selectedPedidosOficina[id].qty > 0);
         };
 
         window.savePedidoOficina = async () => {
-            const obs = document.getElementById('pedidoObs').value;
             const itemsArray = Object.values(selectedPedidosOficina).filter(i => i.qty > 0);
             if(itemsArray.length === 0) return alert("Selecciona máquinas");
-            
             const resumen = itemsArray.map(i => `${i.name} (x${i.qty})`).join(', ');
-            const pedidoObj = { user: 'OFICINA', resumen: resumen, obs: obs, timestamp: Date.now(), date: new Date().toLocaleString() };
-
+            const pedidoObj = { user: 'OFICINA', resumen: resumen, obs: document.getElementById('pedidoObs').value, timestamp: Date.now(), date: new Date().toLocaleString() };
             await push(ref(db, 'pedidos_diarios'), pedidoObj);
-            await push(ref(db, 'pedidos_chat'), { user: 'SISTEMA', text: `📢 NUEVO PEDIDO: ${resumen}. Obs: ${pedidoObj.obs}`, timestamp: Date.now() });
+            await push(ref(db, 'pedidos_chat'), { user: 'SISTEMA', text: `📢 NUEVO PEDIDO: ${resumen}`, timestamp: Date.now() });
             await push(ref(db, 'chat'), { user: 'SISTEMA', text: `🔔 NUEVO PEDIDO OFICINA: ${resumen}`, timestamp: Date.now() });
-            
-            alert("Pedido enviado correctamente");
-            selectedPedidosOficina = {};
-            document.getElementById('pedidoObs').value = '';
-            backToMenu();
+            alert("Pedido enviado correctamente"); backToMenu();
         };
 
         function loadPedidosPlanta() {
-            if(unsubPedidosPlanta) unsubPedidosPlanta();
-            unsubPedidosPlanta = onValue(query(ref(db, 'pedidos_diarios'), limitToLast(10)), (snap) => {
-                const cont = document.getElementById('plantaPedidosList');
-                cont.innerHTML = '';
-                const data = snap.val();
-                if(!data) return;
+            onValue(query(ref(db, 'pedidos_diarios'), limitToLast(10)), (snap) => {
+                const cont = document.getElementById('plantaPedidosList'); cont.innerHTML = '';
+                const data = snap.val(); if(!data) return;
                 Object.values(data).sort((a,b) => b.timestamp - a.timestamp).forEach(p => {
-                    cont.innerHTML += `<div class="alert alert-light border shadow-sm"><div class="d-flex justify-content-between"><strong>Pedido Oficina</strong> <span class="small text-muted">${p.date}</span></div><div class="mt-2"><strong>Máquinas:</strong> ${p.resumen}</div><div class="small italic text-secondary">Obs: ${p.obs || '-'}</div></div>`;
+                    cont.innerHTML += `<div class="alert alert-light border shadow-sm"><strong>${p.date}</strong><br>Máquinas: ${p.resumen}<br><small>Obs: ${p.obs || '-'}</small></div>`;
                 });
             });
         }
@@ -515,21 +483,14 @@
             const txt = document.getElementById('plantaMsg').value; if(!txt) return;
             await push(ref(db, 'pedidos_chat'), { user: 'PLANTA', text: txt, timestamp: Date.now() });
             document.getElementById('plantaMsg').value = '';
-            alert("Mensaje enviado al chat de Pedidos.");
         };
 
-        // --- TALLER ---
+        // --- STOCK & TALLER ---
         window.showDailyForm = () => {
             document.getElementById('mainMenuScreen').style.display = 'none';
             document.getElementById('tallerFormScreen').style.display = 'flex';
-            const operatorInput = document.getElementById('reportOperator');
-            if (restrictedUsers.includes(currentUser)) {
-                operatorInput.value = currentUser.charAt(0).toUpperCase() + currentUser.slice(1);
-                operatorInput.readOnly = true;
-            } else {
-                operatorInput.value = "";
-                operatorInput.readOnly = false;
-            }
+            const op = document.getElementById('reportOperator');
+            if (restrictedUsers.includes(currentUser)) { op.value = currentUser; op.readOnly = true; }
             updateTime(); loadFormSync(); loadTallerHistory();
         };
 
@@ -546,37 +507,28 @@
             document.getElementById('dashboardScreen').style.display = 'none';
             document.getElementById('oficinaPedidoScreen').style.display = 'none';
             document.getElementById('plantaScreen').style.display = 'none';
-
             if(currentUser === 'admin') document.getElementById('adminScreen').style.display = 'flex';
             else if(currentUser === 'planta') document.getElementById('plantaScreen').style.display = 'flex';
             else document.getElementById('mainMenuScreen').style.display = 'flex';
         };
 
-        function updateTime() {
-            const now = new Date();
-            document.getElementById('reportDate').value = now.toLocaleDateString('es-AR') + ' ' + now.toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'});
-        }
+        function updateTime() { document.getElementById('reportDate').value = new Date().toLocaleString(); }
 
         function loadFormSync() {
-            if(unsubRep) unsubRep();
-            unsubRep = onValue(ref(db, 'items'), (snap) => {
+            onValue(ref(db, 'items'), (snap) => {
                 const data = snap.val(); globalItems = data || {};
                 const contRep = document.getElementById('repuestosChecklist');
                 const selectMaq = document.getElementById('reportMachineType');
-                contRep.innerHTML = '';
-                selectMaq.innerHTML = '<option value="" disabled selected>Seleccionar Máquina (+1 al stock)</option>';
+                contRep.innerHTML = ''; selectMaq.innerHTML = '<option value="" disabled selected>Seleccionar Máquina</option>';
                 if(!data) return;
                 Object.keys(data).forEach(id => {
                     const item = data[id];
                     if(item.type === 'repuesto') {
-                        const d = document.createElement('div'); 
-                        d.className = `repuesto-selector`; d.id = `rs-${id}`;
+                        const d = document.createElement('div'); d.className = 'repuesto-selector'; d.id = `rs-${id}`;
                         d.innerHTML = `<span class="rep-name">${item.name}</span><div class="rep-controls"><button class="btn-qty" onclick="changeRepQty('${id}', -1)">-</button><span class="rep-qty" id="rq-${id}">0</span><button class="btn-qty" onclick="changeRepQty('${id}', 1)">+</button></div>`;
                         contRep.appendChild(d);
                     } else if(item.type === 'dispenser') {
-                        const opt = document.createElement('option');
-                        opt.value = item.name; opt.innerText = item.name;
-                        selectMaq.appendChild(opt);
+                        const opt = document.createElement('option'); opt.value = item.name; opt.innerText = item.name; selectMaq.appendChild(opt);
                     }
                 });
             });
@@ -593,95 +545,41 @@
             const op = document.getElementById('reportOperator').value;
             const mc = document.getElementById('reportMachineType').value;
             const ac = document.getElementById('reportActivity').value;
-            if(!op || !mc || !ac) return alert("Completa Operario, Máquina y Actividad");
-            const btn = document.getElementById('btnSaveReport'); btn.disabled = true;
-
+            if(!op || !mc || !ac) return alert("Faltan datos");
             try {
-                const repArray = Object.values(selectedRepuestos).filter(r => r.qty > 0);
-                const repDetailed = repArray.length > 0 ? repArray.map(r => `${r.name} (x${r.qty})`).join(', ') : 'Ninguno';
-                
-                await push(ref(db, 'taller_reports'), { 
-                    date: document.getElementById('reportDate').value, operator: op, machine: mc, activity: ac, observations: document.getElementById('reportObs').value, repuestos: repDetailed, timestamp: Date.now() 
-                });
-
+                const reps = Object.values(selectedRepuestos).filter(r => r.qty > 0).map(r => `${r.name} (x${r.qty})`).join(', ');
+                await push(ref(db, 'taller_reports'), { date: document.getElementById('reportDate').value, operator: op, machine: mc, activity: ac, observations: document.getElementById('reportObs').value, repuestos: reps || 'Ninguno', timestamp: Date.now() });
                 let mId = Object.keys(globalItems).find(id => globalItems[id].name === mc);
-                if(mId) {
-                    const delta = mc.toLowerCase().includes("dispenser natural") ? -1 : 1;
-                    await update(ref(db, `items/${mId}`), { qty: Math.max(0, globalItems[mId].qty + delta) });
-                }
-
-                if (restrictedUsers.includes(currentUser)) {
-                    let repairId = Object.keys(globalItems).find(id => globalItems[id].name.trim().toLowerCase().includes("reparar"));
-                    if (repairId) await update(ref(db, `items/${repairId}`), { qty: Math.max(0, globalItems[repairId].qty - 1) });
-                }
-
-                for(let id in selectedRepuestos) {
-                    if(selectedRepuestos[id].qty > 0) await update(ref(db, `items/${id}`), { qty: Math.max(0, globalItems[id].qty - selectedRepuestos[id].qty) });
-                }
-
-                alert("¡Carga terminada con éxito! ✅");
-                backToMenu();
-            } catch (e) { alert("Error: " + e.message); }
+                if(mId) await update(ref(db, `items/${mId}`), { qty: globalItems[mId].qty + (mc.includes("Natural") ? -1 : 1) });
+                for(let id in selectedRepuestos) if(selectedRepuestos[id].qty > 0) await update(ref(db, `items/${id}`), { qty: Math.max(0, globalItems[id].qty - selectedRepuestos[id].qty) });
+                alert("✅ Éxito"); backToMenu();
+            } catch (e) { alert("Error"); }
         };
 
         function loadItems() {
-            if(unsubItems) unsubItems();
-            unsubItems = onValue(ref(db, 'items'), (snap) => {
+            onValue(ref(db, 'items'), (snap) => {
                 const cont = document.getElementById('itemsContainer'); cont.innerHTML = '';
-                const data = snap.val(); globalItems = data || {};
-                if(data) Object.keys(data).forEach(id => renderItem(id, data[id]));
+                const data = snap.val(); if(!data) return;
+                Object.keys(data).forEach(id => {
+                    let item = data[id];
+                    let canEdit = (currentUser === 'admin' || (currentUser === 'Facu' && item.name.toLowerCase().includes("reparar")));
+                    const card = document.createElement('div'); card.className = 'col-md-4 item-card-wrapper';
+                    card.setAttribute('data-name', item.name.toLowerCase());
+                    const controls = canEdit ? `<button class="btn btn-circle btn-outline-danger shadow-sm" onclick="updateStock('${id}', ${item.qty}, -1, '${item.name}')">-</button><span class="fs-4 fw-bold">${item.qty}</span><button class="btn btn-circle btn-outline-success shadow-sm" onclick="updateStock('${id}', ${item.qty}, 1, '${item.name}')">+</button>` : `<span class="fs-4 fw-bold w-100 text-center">${item.qty}</span>`;
+                    card.innerHTML = `<div class="glass-panel stock-card shadow-sm"><div class="d-flex justify-content-between"><h6 class="fw-bold">${item.name}</h6>${currentUser === 'admin' ? `<button onclick="deleteItem('${id}', '${item.name}')" class="btn text-danger btn-sm p-0"><i class="bi bi-trash"></i></button>` : ''}</div><div class="d-flex justify-content-between align-items-center mt-3 p-2 bg-white rounded-3">${controls}</div></div>`;
+                    cont.appendChild(card);
+                });
             });
-        }
-
-        function renderItem(id, item) {
-            let canEdit = (currentUser === 'admin' || (currentUser === 'Facu' && item.name.toLowerCase().includes("reparar")));
-            const card = document.createElement('div'); card.className = 'col-md-4 item-card-wrapper';
-            card.setAttribute('data-name', item.name.toLowerCase());
-            const controlsHtml = canEdit ?
-                `<button class="btn btn-circle btn-outline-danger shadow-sm" onclick="updateStock('${id}', ${item.qty}, -1, '${item.name}')">-</button>
-                 <span class="fs-4 fw-bold">${item.qty}</span>
-                 <button class="btn btn-circle btn-outline-success shadow-sm" onclick="updateStock('${id}', ${item.qty}, 1, '${item.name}')">+</button>` :
-                `<span class="fs-4 fw-bold w-100 text-center">${item.qty}</span>`;
-
-            card.innerHTML = `<div class="glass-panel stock-card shadow-sm"><div class="d-flex justify-content-between"><h6 class="fw-bold">${item.name}</h6>${currentUser === 'admin' ? `<button onclick="deleteItem('${id}', '${item.name}')" class="btn text-danger btn-sm p-0"><i class="bi bi-trash"></i></button>` : ''}</div><div class="d-flex justify-content-between align-items-center mt-3 p-2 bg-white rounded-3">${controlsHtml}</div></div>`;
-            document.getElementById('itemsContainer').appendChild(card);
         }
 
         window.updateStock = (id, cur, amt, name) => {
-            if(cur + amt < 0) return;
-            update(ref(db, `items/${id}`), { qty: cur + amt });
-            push(ref(db, 'history'), { type: 'manual', user: currentUser.toUpperCase(), desc: `${amt>0?'Sumó':'Restó'} ${Math.abs(amt)} a ${name}`, date: new Date().toLocaleString(), timestamp: Date.now() });
+            update(ref(db, `items/${id}`), { qty: Math.max(0, cur + amt) });
+            push(ref(db, 'history'), { user: currentUser.toUpperCase(), desc: `${amt>0?'Sumó':'Restó'} ${Math.abs(amt)} a ${name}`, date: new Date().toLocaleString(), timestamp: Date.now() });
         };
 
-        function loadTallerHistory() {
-            onValue(query(ref(db, 'taller_reports'), limitToLast(12)), snap => {
-                const list = document.getElementById('tallerHistoryList'); list.innerHTML = '';
-                const data = snap.val(); if(!data) return;
-                Object.values(data).sort((a,b) => b.timestamp - a.timestamp).forEach(i => {
-                    list.innerHTML += `<div class="history-box taller"><b>${i.operator}</b> - ${i.machine}<br><small>${i.date}</small></div>`;
-                });
-            });
-        }
-
-        window.loadHistory = () => {
-            onValue(query(ref(db, 'history'), limitToLast(20)), snap => {
-                const cont = document.getElementById('historyContainer'); cont.innerHTML = '';
-                const data = snap.val(); if(!data) return;
-                Object.values(data).sort((a,b) => b.timestamp - a.timestamp).forEach(l => {
-                    cont.innerHTML += `<div class="history-box manual"><b>${l.user}</b>: ${l.desc}<br><small>${l.date}</small></div>`;
-                });
-            });
-        }
-
-        window.loadAdminHistory = () => {
-            onValue(ref(db, 'taller_reports'), snap => {
-                const tbody = document.getElementById('adminReportsTable'); tbody.innerHTML = '';
-                const data = snap.val(); if(!data) return;
-                Object.values(data).sort((a,b) => b.timestamp - a.timestamp).forEach(i => {
-                    tbody.innerHTML += `<tr><td>${i.date}</td><td>${i.operator}</td><td>${i.machine}</td><td>${i.activity}</td><td>${i.repuestos}</td><td>${i.observations || ''}</td></tr>`;
-                });
-            });
-        };
+        function loadTallerHistory() { onValue(query(ref(db, 'taller_reports'), limitToLast(12)), snap => { const list = document.getElementById('tallerHistoryList'); list.innerHTML = ''; const data = snap.val(); if(!data) return; Object.values(data).sort((a,b) => b.timestamp - a.timestamp).forEach(i => { list.innerHTML += `<div class="history-box taller"><b>${i.operator}</b> - ${i.machine}<br><small>${i.date}</small></div>`; }); }); }
+        window.loadHistory = () => { onValue(query(ref(db, 'history'), limitToLast(20)), snap => { const cont = document.getElementById('historyContainer'); cont.innerHTML = ''; const data = snap.val(); if(!data) return; Object.values(data).sort((a,b) => b.timestamp - a.timestamp).forEach(l => { cont.innerHTML += `<div class="history-box manual"><b>${l.user}</b>: ${l.desc}<br><small>${l.date}</small></div>`; }); }); }
+        window.loadAdminHistory = () => { onValue(ref(db, 'taller_reports'), snap => { const tbody = document.getElementById('adminReportsTable'); tbody.innerHTML = ''; const data = snap.val(); if(!data) return; Object.values(data).sort((a,b) => b.timestamp - a.timestamp).forEach(i => { tbody.innerHTML += `<tr><td>${i.date}</td><td>${i.operator}</td><td>${i.machine}</td><td>${i.activity}</td><td>${i.repuestos}</td><td>${i.observations || ''}</td></tr>`; }); }); };
 
         window.addNewItem = () => {
             push(ref(db, 'items'), { name: document.getElementById('newItemName').value, type: document.getElementById('newItemType').value, qty: parseInt(document.getElementById('newItemQty').value)||0 });
@@ -689,10 +587,7 @@
         };
 
         window.deleteItem = (id, n) => confirm(`¿Borrar ${n}?`) && remove(ref(db, `items/${id}`));
-        window.filterItems = () => {
-            const t = document.getElementById('searchInput').value.toLowerCase();
-            document.querySelectorAll('.item-card-wrapper').forEach(c => c.style.display = c.dataset.name.includes(t)?'block':'none');
-        };
+        window.filterItems = () => { const t = document.getElementById('searchInput').value.toLowerCase(); document.querySelectorAll('.item-card-wrapper').forEach(c => c.style.display = c.dataset.name.includes(t)?'block':'none'); };
 
         const script = document.createElement('script'); script.src = "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"; document.body.appendChild(script);
     </script>
