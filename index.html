@@ -42,9 +42,9 @@
         #chat-input-area { display: flex; background: white; border-radius: 0 0 15px 15px; border-top: 1px solid #ddd; padding: 8px; }
         #chat-toggle { width: 100%; border-radius: 20px; font-weight: bold; margin-top: 5px; position: relative; }
 
-        /* Badge de Notificación WhatsApp Style */
-        .badge-notif { position: absolute; top: -5px; right: -5px; background: #ff3b30; color: white; border-radius: 50%; padding: 2px 6px; font-size: 0.7rem; min-width: 18px; text-align: center; display: none; border: 2px solid white; }
-        .chat-tab .badge-notif { top: 2px; right: 5px; position: absolute; }
+        /* Estilo Notificaciones */
+        .badge-notif { position: absolute; top: -5px; right: -5px; background: #ff3b30; color: white; border-radius: 50%; padding: 2px 6px; font-size: 0.7rem; min-width: 18px; text-align: center; display: none; border: 2px solid white; font-weight: bold; }
+        .chat-tab .badge-notif { top: 2px; right: 5px; }
 
         /* Alerta de Pedidos */
         #pedido-alert-container { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); width: 90%; max-width: 600px; z-index: 2000; display: none; }
@@ -98,7 +98,7 @@
             </div>
             <div class="modern-input-group">
                 <i class="bi bi-lock-fill modern-input-icon"></i>
-                <input type="password" id="passwordInput" class="modern-input" placeholder="Contraseña">
+                <input type="password" id="passwordInput" class="modern-input" placeholder="Contraseña" onkeydown="if(event.key==='Enter') login()">
             </div>
             <button onclick="login()" class="btn btn-primary w-100 py-3 rounded-pill fw-bold shadow">INGRESAR</button>
             <p id="loginError" class="text-danger small mt-3 fw-bold" style="display:none;">Error de credenciales</p>
@@ -238,7 +238,7 @@
             </div>
             <div id="chat-box-messages"></div>
             <div id="chat-input-area">
-                <input type="text" id="chat-input" class="form-control form-control-sm" placeholder="Escribir...">
+                <input type="text" id="chat-input" class="form-control form-control-sm" placeholder="Escribir..." onkeydown="if(event.key==='Enter') sendChatMessage()">
                 <button onclick="sendChatMessage()" class="btn btn-primary btn-sm ms-1"><i class="bi bi-send"></i></button>
             </div>
         </div>
@@ -278,10 +278,6 @@
         const restrictedUsers = ['mauro', 'javier', 'facundo', 'Facu'];
         const notifyUsers = ['Facu', 'javier', 'facundo', 'planta', 'admin'];
 
-        // ENTER KEY LISTENERS
-        document.getElementById('passwordInput').addEventListener('keypress', (e) => { if(e.key === 'Enter') login(); });
-        document.getElementById('chat-input').addEventListener('keypress', (e) => { if(e.key === 'Enter') sendChatMessage(); });
-
         window.login = () => {
             const u = document.getElementById('usernameInput').value;
             const p = document.getElementById('passwordInput').value;
@@ -313,49 +309,41 @@
 
         window.logout = () => location.reload();
 
-        // --- NOTIFICACIONES WHATSAPP STYLE ---
+        // --- NOTIFICACIONES (WHATSAPP STYLE) ---
         function initNotifListeners() {
-            // Global
+            // Escucha Global
             onValue(ref(db, 'chat'), (snap) => {
-                const data = snap.val();
-                if(!data) return;
+                const data = snap.val(); if(!data) return;
                 const lastRead = parseInt(localStorage.getItem(`lastRead_global_${currentUser}`)) || 0;
                 let count = 0;
-                Object.values(data).forEach(m => { if(m.timestamp > lastRead) count++; });
-                updateBadge('global', count);
+                Object.values(data).forEach(m => {
+                    if(m.timestamp > lastRead && m.user !== currentUser.toUpperCase()) count++;
+                });
+                updateNotifBadge('global', count);
             });
-            // Pedidos
+            // Escucha Pedidos
             onValue(ref(db, 'pedidos_chat'), (snap) => {
-                const data = snap.val();
-                if(!data) return;
+                const data = snap.val(); if(!data) return;
                 const lastRead = parseInt(localStorage.getItem(`lastRead_pedidos_${currentUser}`)) || 0;
                 let count = 0;
-                Object.values(data).forEach(m => { if(m.timestamp > lastRead) count++; });
-                updateBadge('pedidos', count);
+                Object.values(data).forEach(m => {
+                    if(m.timestamp > lastRead && m.user !== currentUser.toUpperCase()) count++;
+                });
+                updateNotifBadge('pedidos', count);
             });
         }
 
-        function updateBadge(type, count) {
-            const el = document.getElementById(`count-${type}`);
-            if(count > 0) {
-                el.innerText = count > 99 ? '99+' : count;
-                el.style.display = 'block';
-            } else {
-                el.style.display = 'none';
-            }
-            // Update total
-            const g = parseInt(document.getElementById('count-global').innerText) || 0;
-            const p = parseInt(document.getElementById('count-pedidos').innerText) || 0;
-            const total = (document.getElementById('count-global').style.display === 'block' ? g : 0) + 
-                          (document.getElementById('count-pedidos').style.display === 'block' ? p : 0);
-            
-            const totalEl = document.getElementById('count-total');
-            if(total > 0) {
-                totalEl.innerText = total;
-                totalEl.style.display = 'block';
-            } else {
-                totalEl.style.display = 'none';
-            }
+        function updateNotifBadge(type, count) {
+            const badge = document.getElementById(`count-${type}`);
+            if(count > 0) { badge.innerText = count; badge.style.display = 'block'; }
+            else badge.style.display = 'none';
+
+            const gCount = document.getElementById('count-global').style.display === 'block' ? parseInt(document.getElementById('count-global').innerText) : 0;
+            const pCount = document.getElementById('count-pedidos').style.display === 'block' ? parseInt(document.getElementById('count-pedidos').innerText) : 0;
+            const total = gCount + pCount;
+            const totalBadge = document.getElementById('count-total');
+            if(total > 0) { totalBadge.innerText = total; totalBadge.style.display = 'block'; }
+            else totalBadge.style.display = 'none';
         }
 
         // --- CHAT DUAL ---
@@ -364,7 +352,6 @@
             localStorage.setItem(`lastRead_${tab}_${currentUser}`, Date.now());
             document.querySelectorAll('.chat-tab').forEach(t => t.classList.remove('active'));
             document.getElementById('tab-' + tab).classList.add('active');
-            document.getElementById(`count-${tab}`).style.display = 'none';
             initChatListener();
         };
 
@@ -372,8 +359,7 @@
             if(unsubChat) unsubChat();
             const path = currentChatTab === 'global' ? 'chat' : 'pedidos_chat';
             unsubChat = onValue(query(ref(db, path), limitToLast(30)), (snap) => {
-                const box = document.getElementById('chat-box-messages'); 
-                box.innerHTML = '';
+                const box = document.getElementById('chat-box-messages'); box.innerHTML = '';
                 const data = snap.val();
                 if(data) {
                     Object.values(data).sort((a,b) => a.timestamp - b.timestamp).forEach(m => {
@@ -391,7 +377,9 @@
         window.sendChatMessage = async () => {
             const input = document.getElementById('chat-input'); const txt = input.value.trim(); if(!txt) return;
             const path = currentChatTab === 'global' ? 'chat' : 'pedidos_chat';
-            await push(ref(db, path), { user: currentUser.toUpperCase(), text: txt, timestamp: Date.now() });
+            const now = Date.now();
+            localStorage.setItem(`lastRead_${currentChatTab}_${currentUser}`, now + 500); // Marcar como leido para uno mismo
+            await push(ref(db, path), { user: currentUser.toUpperCase(), text: txt, timestamp: now });
             input.value = '';
         };
 
@@ -400,13 +388,13 @@
             w.style.display = w.style.display === 'flex' ? 'none' : 'flex';
             if(w.style.display === 'flex') {
                 localStorage.setItem(`lastRead_${currentChatTab}_${currentUser}`, Date.now());
-                updateBadge(currentChatTab, 0);
+                initChatListener();
             }
         };
 
         // --- PEDIDOS ---
         function listenForPedidos() {
-            if(['oficina', 'admin', 'planta'].includes(currentUser)) return;
+            if(!notifyUsers.includes(currentUser) && currentUser !== 'oficina') return;
             unsubAlerts = onValue(query(ref(db, 'pedidos_diarios'), limitToLast(1)), (snap) => {
                 const data = snap.val();
                 if(data) {
@@ -502,7 +490,7 @@
 
             await push(ref(db, 'pedidos_diarios'), pedidoObj);
             await push(ref(db, 'pedidos_chat'), { user: 'SISTEMA', text: `📢 NUEVO PEDIDO: ${resumen}. Obs: ${pedidoObj.obs}`, timestamp: Date.now() });
-            await push(ref(db, 'chat'), { user: 'SISTEMA', text: `🔔 NUEVO PEDIDO DE OFICINA: ${resumen}`, timestamp: Date.now() });
+            await push(ref(db, 'chat'), { user: 'SISTEMA', text: `🔔 NUEVO PEDIDO OFICINA: ${resumen}`, timestamp: Date.now() });
             
             alert("Pedido enviado correctamente");
             selectedPedidosOficina = {};
@@ -527,6 +515,7 @@
             const txt = document.getElementById('plantaMsg').value; if(!txt) return;
             await push(ref(db, 'pedidos_chat'), { user: 'PLANTA', text: txt, timestamp: Date.now() });
             document.getElementById('plantaMsg').value = '';
+            alert("Mensaje enviado al chat de Pedidos.");
         };
 
         // --- TALLER ---
@@ -537,7 +526,10 @@
             if (restrictedUsers.includes(currentUser)) {
                 operatorInput.value = currentUser.charAt(0).toUpperCase() + currentUser.slice(1);
                 operatorInput.readOnly = true;
-            } else { operatorInput.value = ""; operatorInput.readOnly = false; }
+            } else {
+                operatorInput.value = "";
+                operatorInput.readOnly = false;
+            }
             updateTime(); loadFormSync(); loadTallerHistory();
         };
 
@@ -554,6 +546,7 @@
             document.getElementById('dashboardScreen').style.display = 'none';
             document.getElementById('oficinaPedidoScreen').style.display = 'none';
             document.getElementById('plantaScreen').style.display = 'none';
+
             if(currentUser === 'admin') document.getElementById('adminScreen').style.display = 'flex';
             else if(currentUser === 'planta') document.getElementById('plantaScreen').style.display = 'flex';
             else document.getElementById('mainMenuScreen').style.display = 'flex';
@@ -576,11 +569,13 @@
                 Object.keys(data).forEach(id => {
                     const item = data[id];
                     if(item.type === 'repuesto') {
-                        const d = document.createElement('div'); d.className = `repuesto-selector`; d.id = `rs-${id}`;
+                        const d = document.createElement('div'); 
+                        d.className = `repuesto-selector`; d.id = `rs-${id}`;
                         d.innerHTML = `<span class="rep-name">${item.name}</span><div class="rep-controls"><button class="btn-qty" onclick="changeRepQty('${id}', -1)">-</button><span class="rep-qty" id="rq-${id}">0</span><button class="btn-qty" onclick="changeRepQty('${id}', 1)">+</button></div>`;
                         contRep.appendChild(d);
                     } else if(item.type === 'dispenser') {
-                        const opt = document.createElement('option'); opt.value = item.name; opt.innerText = item.name;
+                        const opt = document.createElement('option');
+                        opt.value = item.name; opt.innerText = item.name;
                         selectMaq.appendChild(opt);
                     }
                 });
@@ -599,24 +594,34 @@
             const mc = document.getElementById('reportMachineType').value;
             const ac = document.getElementById('reportActivity').value;
             if(!op || !mc || !ac) return alert("Completa Operario, Máquina y Actividad");
+            const btn = document.getElementById('btnSaveReport'); btn.disabled = true;
+
             try {
                 const repArray = Object.values(selectedRepuestos).filter(r => r.qty > 0);
                 const repDetailed = repArray.length > 0 ? repArray.map(r => `${r.name} (x${r.qty})`).join(', ') : 'Ninguno';
-                await push(ref(db, 'taller_reports'), { date: document.getElementById('reportDate').value, operator: op, machine: mc, activity: ac, observations: document.getElementById('reportObs').value, repuestos: repDetailed, timestamp: Date.now() });
+                
+                await push(ref(db, 'taller_reports'), { 
+                    date: document.getElementById('reportDate').value, operator: op, machine: mc, activity: ac, observations: document.getElementById('reportObs').value, repuestos: repDetailed, timestamp: Date.now() 
+                });
+
                 let mId = Object.keys(globalItems).find(id => globalItems[id].name === mc);
                 if(mId) {
                     const delta = mc.toLowerCase().includes("dispenser natural") ? -1 : 1;
                     await update(ref(db, `items/${mId}`), { qty: Math.max(0, globalItems[mId].qty + delta) });
                 }
+
                 if (restrictedUsers.includes(currentUser)) {
                     let repairId = Object.keys(globalItems).find(id => globalItems[id].name.trim().toLowerCase().includes("reparar"));
                     if (repairId) await update(ref(db, `items/${repairId}`), { qty: Math.max(0, globalItems[repairId].qty - 1) });
                 }
+
                 for(let id in selectedRepuestos) {
                     if(selectedRepuestos[id].qty > 0) await update(ref(db, `items/${id}`), { qty: Math.max(0, globalItems[id].qty - selectedRepuestos[id].qty) });
                 }
-                alert("✅ Éxito"); backToMenu();
-            } catch (e) { alert("Error"); }
+
+                alert("¡Carga terminada con éxito! ✅");
+                backToMenu();
+            } catch (e) { alert("Error: " + e.message); }
         };
 
         function loadItems() {
@@ -633,8 +638,11 @@
             const card = document.createElement('div'); card.className = 'col-md-4 item-card-wrapper';
             card.setAttribute('data-name', item.name.toLowerCase());
             const controlsHtml = canEdit ?
-                `<button class="btn btn-circle btn-outline-danger shadow-sm" onclick="updateStock('${id}', ${item.qty}, -1, '${item.name}')">-</button><span class="fs-4 fw-bold">${item.qty}</span><button class="btn btn-circle btn-outline-success shadow-sm" onclick="updateStock('${id}', ${item.qty}, 1, '${item.name}')">+</button>` :
+                `<button class="btn btn-circle btn-outline-danger shadow-sm" onclick="updateStock('${id}', ${item.qty}, -1, '${item.name}')">-</button>
+                 <span class="fs-4 fw-bold">${item.qty}</span>
+                 <button class="btn btn-circle btn-outline-success shadow-sm" onclick="updateStock('${id}', ${item.qty}, 1, '${item.name}')">+</button>` :
                 `<span class="fs-4 fw-bold w-100 text-center">${item.qty}</span>`;
+
             card.innerHTML = `<div class="glass-panel stock-card shadow-sm"><div class="d-flex justify-content-between"><h6 class="fw-bold">${item.name}</h6>${currentUser === 'admin' ? `<button onclick="deleteItem('${id}', '${item.name}')" class="btn text-danger btn-sm p-0"><i class="bi bi-trash"></i></button>` : ''}</div><div class="d-flex justify-content-between align-items-center mt-3 p-2 bg-white rounded-3">${controlsHtml}</div></div>`;
             document.getElementById('itemsContainer').appendChild(card);
         }
@@ -649,7 +657,9 @@
             onValue(query(ref(db, 'taller_reports'), limitToLast(12)), snap => {
                 const list = document.getElementById('tallerHistoryList'); list.innerHTML = '';
                 const data = snap.val(); if(!data) return;
-                Object.values(data).sort((a,b) => b.timestamp - a.timestamp).forEach(i => { list.innerHTML += `<div class="history-box taller"><b>${i.operator}</b> - ${i.machine}<br><small>${i.date}</small></div>`; });
+                Object.values(data).sort((a,b) => b.timestamp - a.timestamp).forEach(i => {
+                    list.innerHTML += `<div class="history-box taller"><b>${i.operator}</b> - ${i.machine}<br><small>${i.date}</small></div>`;
+                });
             });
         }
 
@@ -657,7 +667,9 @@
             onValue(query(ref(db, 'history'), limitToLast(20)), snap => {
                 const cont = document.getElementById('historyContainer'); cont.innerHTML = '';
                 const data = snap.val(); if(!data) return;
-                Object.values(data).sort((a,b) => b.timestamp - a.timestamp).forEach(l => { cont.innerHTML += `<div class="history-box manual"><b>${l.user}</b>: ${l.desc}<br><small>${l.date}</small></div>`; });
+                Object.values(data).sort((a,b) => b.timestamp - a.timestamp).forEach(l => {
+                    cont.innerHTML += `<div class="history-box manual"><b>${l.user}</b>: ${l.desc}<br><small>${l.date}</small></div>`;
+                });
             });
         }
 
@@ -665,7 +677,9 @@
             onValue(ref(db, 'taller_reports'), snap => {
                 const tbody = document.getElementById('adminReportsTable'); tbody.innerHTML = '';
                 const data = snap.val(); if(!data) return;
-                Object.values(data).sort((a,b) => b.timestamp - a.timestamp).forEach(i => { tbody.innerHTML += `<tr><td>${i.date}</td><td>${i.operator}</td><td>${i.machine}</td><td>${i.activity}</td><td>${i.repuestos}</td><td>${i.observations || ''}</td></tr>`; });
+                Object.values(data).sort((a,b) => b.timestamp - a.timestamp).forEach(i => {
+                    tbody.innerHTML += `<tr><td>${i.date}</td><td>${i.operator}</td><td>${i.machine}</td><td>${i.activity}</td><td>${i.repuestos}</td><td>${i.observations || ''}</td></tr>`;
+                });
             });
         };
 
