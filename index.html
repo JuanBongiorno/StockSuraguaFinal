@@ -33,14 +33,18 @@
         #chat-container { position: fixed; bottom: 20px; right: 20px; width: 320px; z-index: 1000; display: none; }
         #chat-window { background: white; border-radius: 15px; border: 1px solid #ddd; display: none; flex-direction: column; box-shadow: 0 5px 25px rgba(0,0,0,0.2); }
         .chat-tabs { display: flex; background: #f8f9fa; border-radius: 15px 15px 0 0; border-bottom: 1px solid #ddd; }
-        .chat-tab { flex: 1; padding: 10px; text-align: center; cursor: pointer; font-size: 0.8rem; font-weight: 600; color: #666; }
+        .chat-tab { flex: 1; padding: 10px; text-align: center; cursor: pointer; font-size: 0.8rem; font-weight: 600; color: #666; position: relative; }
         .chat-tab.active { background: white; color: #007bff; border-bottom: 2px solid #007bff; }
         #chat-box-messages { height: 300px; overflow-y: auto; display: flex; flex-direction: column; padding: 10px; }
         .chat-msg { margin-bottom: 8px; padding: 8px 12px; border-radius: 12px; background: #f1f1f1; font-size: 0.82rem; }
         .chat-msg b { color: #007bff; display: block; font-size: 0.72rem; }
         .chat-msg.pedido-log { background: #fff4e5; border-left: 3px solid #ffa000; }
         #chat-input-area { display: flex; background: white; border-radius: 0 0 15px 15px; border-top: 1px solid #ddd; padding: 8px; }
-        #chat-toggle { width: 100%; border-radius: 20px; font-weight: bold; margin-top: 5px; transition: 0.3s; }
+        #chat-toggle { width: 100%; border-radius: 20px; font-weight: bold; margin-top: 5px; transition: 0.3s; position: relative; }
+
+        /* Punto de notificación */
+        .notif-dot { position: absolute; top: 5px; right: 10px; width: 8px; height: 8px; background: #ff3b30; border-radius: 50%; display: none; }
+        .chat-tab .notif-dot { top: 12px; right: 15px; }
 
         /* Alerta de Pedidos */
         #pedido-alert-container { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); width: 90%; max-width: 600px; z-index: 2000; display: none; }
@@ -64,7 +68,7 @@
 </head>
 <body>
 
-    <!-- NOTIFICACIÓN DE PEDIDO -->
+    <!-- NOTIFICACIÓN DE PEDIDO AMARILLA (SOLO PARA OPERARIOS) -->
     <div id="pedido-alert-container">
         <div class="pedido-notif">
             <div class="d-flex justify-content-between align-items-start">
@@ -225,8 +229,8 @@
     <div id="chat-container">
         <div id="chat-window">
             <div class="chat-tabs">
-                <div id="tab-global" class="chat-tab active" onclick="switchChat('global')">GLOBAL</div>
-                <div id="tab-pedidos" class="chat-tab" onclick="switchChat('pedidos')">PEDIDOS</div>
+                <div id="tab-global" class="chat-tab active" onclick="switchChat('global')">GLOBAL <span id="dot-global" class="notif-dot"></span></div>
+                <div id="tab-pedidos" class="chat-tab" onclick="switchChat('pedidos')">PEDIDOS <span id="dot-pedidos" class="notif-dot"></span></div>
             </div>
             <div id="chat-box-messages"></div>
             <div id="chat-input-area">
@@ -256,7 +260,11 @@
         let globalItems = {};
         let selectedRepuestos = {}; 
         let selectedPedidosOficina = {};
+        
+        // Unsubs y estados de notificacion
         let unsubChat, unsubAlerts, unsubTaller, unsubItems, unsubHistory, unsubAdmin, unsubRep, unsubPedidosPlanta;
+        let unreadGlobal = false;
+        let unreadPedidos = false;
 
         const credentials = { 
             oficina: "Broncel3876", 
@@ -278,9 +286,9 @@
                 document.getElementById('loginScreen').style.display = 'none';
                 document.getElementById('userDisplay').innerText = u.toUpperCase();
                 
-                // MOSTRAR CHAT SOLO AL LOGUEARSE
                 document.getElementById('chat-container').style.display = 'block';
                 switchChat('global');
+                startChatBackgroundListeners(); // Iniciar monitoreo de ambos chats
                 listenForPedidos();
                 
                 if(u === 'admin') { 
@@ -301,11 +309,65 @@
 
         window.logout = () => location.reload();
 
-        // --- CHAT DUAL ---
+        // --- CHAT DUAL CON NOTIFICACIONES ---
+        
+        // Listener de fondo para detectar mensajes en ambos chats simultáneamente
+        function startChatBackgroundListeners() {
+            // Escuchar Chat Global
+            onValue(query(ref(db, 'chat'), limitToLast(1)), (snap) => {
+                const data = snap.val();
+                if(data) {
+                    const msg = Object.values(data)[0];
+                    // Si el chat está cerrado O estamos en la pestaña de pedidos, marcar global como no leído
+                    const isChatClosed = document.getElementById('chat-window').style.display !== 'flex';
+                    if ( (isChatClosed || currentChatTab !== 'global') && Date.now() - msg.timestamp < 5000) {
+                        unreadGlobal = true;
+                        updateNotifUI();
+                    }
+                }
+            });
+
+            // Escuchar Chat Pedidos
+            onValue(query(ref(db, 'pedidos_chat'), limitToLast(1)), (snap) => {
+                const data = snap.val();
+                if(data) {
+                    const msg = Object.values(data)[0];
+                    // Si el chat está cerrado O estamos en la pestaña global, marcar pedidos como no leído
+                    const isChatClosed = document.getElementById('chat-window').style.display !== 'flex';
+                    if ( (isChatClosed || currentChatTab !== 'pedidos') && Date.now() - msg.timestamp < 5000) {
+                        unreadPedidos = true;
+                        updateNotifUI();
+                    }
+                }
+            });
+        }
+
+        function updateNotifUI() {
+            const btn = document.getElementById('chat-toggle');
+            const dotG = document.getElementById('dot-global');
+            const dotP = document.getElementById('dot-pedidos');
+
+            // Mostrar puntos rojos en las pestañas
+            dotG.style.display = unreadGlobal ? 'block' : 'none';
+            dotP.style.display = unreadPedidos ? 'block' : 'none';
+
+            // Si hay algo sin leer en CUALQUIERA de los dos, poner botón rojo
+            if (unreadGlobal || unreadPedidos) {
+                btn.classList.replace('btn-primary', 'btn-danger');
+            } else {
+                btn.classList.replace('btn-danger', 'btn-primary');
+            }
+        }
+
         window.switchChat = (tab) => {
             currentChatTab = tab;
+            if(tab === 'global') unreadGlobal = false;
+            if(tab === 'pedidos') unreadPedidos = false;
+            
             document.querySelectorAll('.chat-tab').forEach(t => t.classList.remove('active'));
             document.getElementById('tab-' + tab).classList.add('active');
+            
+            updateNotifUI();
             initChatListener();
         };
 
@@ -315,18 +377,10 @@
             unsubChat = onValue(query(ref(db, path), limitToLast(30)), (snap) => {
                 const box = document.getElementById('chat-box-messages'); box.innerHTML = '';
                 const data = snap.val();
-                if(data) {
-                    Object.values(data).sort((a,b) => a.timestamp - b.timestamp).forEach(m => {
-                        const isPedido = m.text.includes("NUEVO PEDIDO") || m.text.includes("🔔");
-                        box.innerHTML += `<div class="chat-msg ${isPedido?'pedido-log':''}"><b>${m.user}</b>${m.text}</div>`;
-                    });
-                    
-                    // MODIFICACIÓN: Alerta visual en botón de chat si hay mensajes nuevos y está cerrado
-                    const chatWin = document.getElementById('chat-window');
-                    if (chatWin.style.display !== 'flex') {
-                        document.getElementById('chat-toggle').classList.replace('btn-primary', 'btn-danger');
-                    }
-                }
+                if(data) Object.values(data).sort((a,b) => a.timestamp - b.timestamp).forEach(m => {
+                    const isPedido = m.text.includes("NUEVO PEDIDO") || m.text.includes("🔔");
+                    box.innerHTML += `<div class="chat-msg ${isPedido?'pedido-log':''}"><b>${m.user}</b>${m.text}</div>`;
+                });
                 box.scrollTop = box.scrollHeight;
             });
         }
@@ -340,19 +394,21 @@
 
         window.toggleChat = () => {
             const w = document.getElementById('chat-window');
-            const btn = document.getElementById('chat-toggle');
             w.style.display = w.style.display === 'flex' ? 'none' : 'flex';
-            // Al abrir el chat, restauramos el color azul del botón
+            
+            // Si abrimos el chat, limpiamos la notificación de la pestaña que estamos viendo
             if (w.style.display === 'flex') {
-                btn.classList.replace('btn-danger', 'btn-primary');
+                if(currentChatTab === 'global') unreadGlobal = false;
+                if(currentChatTab === 'pedidos') unreadPedidos = false;
+                updateNotifUI();
             }
         };
 
         // --- PEDIDOS ---
         function listenForPedidos() {
-            // MODIFICACIÓN: No mostrar alerta amarilla a Oficina, Admin ni Planta
-            if(['oficina', 'admin', 'planta'].includes(currentUser)) return;
-            
+            // No mostrar la alerta amarilla a oficina, planta ni admin (ellos ven el chat)
+            if(['oficina', 'planta', 'admin'].includes(currentUser)) return;
+
             unsubAlerts = onValue(query(ref(db, 'pedidos_diarios'), limitToLast(1)), (snap) => {
                 const data = snap.val();
                 if(data) {
@@ -454,10 +510,10 @@
 
             await push(ref(db, 'pedidos_diarios'), pedidoObj);
             
-            // REGISTRO EN CHAT PEDIDOS
+            // 1. REGISTRO EN CHAT PEDIDOS (Para que salga la notificación en esa pestaña)
             await push(ref(db, 'pedidos_chat'), { user: 'SISTEMA', text: `📢 NUEVO PEDIDO: ${resumen}. Obs: ${pedidoObj.obs}`, timestamp: Date.now() });
             
-            // MODIFICACIÓN: Envío automático a CHAT GLOBAL para Admin y Planta
+            // 2. REGISTRO EN CHAT GLOBAL (Para que salga la notificación general a Admin y Planta)
             await push(ref(db, 'chat'), { user: 'SISTEMA', text: `🔔 NUEVO PEDIDO CARGADO: ${resumen}`, timestamp: Date.now() });
 
             alert("Pedido enviado correctamente");
@@ -583,7 +639,6 @@
                     date: document.getElementById('reportDate').value, operator: op, machine: mc, activity: ac, observations: document.getElementById('reportObs').value, repuestos: repDetailed, timestamp: Date.now() 
                 });
 
-                // LÓGICA STOCK: Dispenser Natural resta, el resto suma
                 let mId = Object.keys(globalItems).find(id => globalItems[id].name === mc);
                 if(mId) {
                     const delta = mc.toLowerCase().includes("dispenser natural") ? -1 : 1;
@@ -601,7 +656,7 @@
 
                 alert("¡Carga terminada con éxito! ✅");
                 backToMenu();
-            } catch (e) { alert("Error: " + e.message); }
+            } catch (e) { alert("Error: " + e.message); btn.disabled = false; }
         };
 
         // --- STOCK PERMISOS ---
