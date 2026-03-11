@@ -348,10 +348,9 @@
         // --- CHAT LOGIC ---
         window.switchChat = (tab) => {
             currentChatTab = tab;
-            // Al cambiar, marcamos como leído inmediatamente
-            const now = Date.now();
-            localStorage.setItem(`lastRead_${tab}_${currentUser}`, now);
-            updateBadgeUI(tab, 0); // Forzar borrado visual del badge
+            // Al hacer clic, marcamos como leído en el momento exacto
+            localStorage.setItem(`lastRead_${tab}_${currentUser}`, Date.now());
+            updateBadgeUI(tab, 0); 
 
             document.querySelectorAll('.chat-tab').forEach(t => t.classList.remove('active'));
             document.getElementById('tab-' + tab).classList.add('active');
@@ -360,8 +359,8 @@
 
         function initChatListener() {
             if(unsubChat) unsubChat();
-            const path = currentChatTab === 'global' ? 'chat' : 'pedidos_chat';
-            // Listener principal de mensajes
+            const path = (currentChatTab === 'global') ? 'chat' : 'pedidos_chat';
+            
             unsubChat = onValue(query(ref(db, path), limitToLast(40)), (snap) => {
                 const box = document.getElementById('chat-box-messages'); 
                 box.innerHTML = '';
@@ -374,7 +373,7 @@
                 }
                 box.scrollTop = box.scrollHeight;
                 
-                // Si la ventana está abierta en esta pestaña, actualizar el "leído" constantemente
+                // Si la ventana de chat está visible en esta pestaña, marcamos como leídos los entrantes
                 if(document.getElementById('chat-window').style.display === 'flex') {
                     localStorage.setItem(`lastRead_${currentChatTab}_${currentUser}`, Date.now());
                 }
@@ -385,7 +384,7 @@
             const input = document.getElementById('chat-input'); const txt = input.value.trim(); if(!txt) return;
             const path = currentChatTab === 'global' ? 'chat' : 'pedidos_chat';
             const now = Date.now();
-            // Evitar que el propio mensaje genere notificación al emisor
+            // Marcar mi mensaje como "visto" para mí mismo antes de enviarlo
             localStorage.setItem(`lastRead_${currentChatTab}_${currentUser}`, now + 500); 
             await push(ref(db, path), { user: currentUser.toUpperCase(), text: txt, timestamp: now });
             input.value = '';
@@ -396,6 +395,7 @@
             const isOpening = w.style.display !== 'flex';
             w.style.display = isOpening ? 'flex' : 'none';
             if(isOpening) {
+                // Al abrir, forzamos la actualización de lectura de la pestaña actual
                 localStorage.setItem(`lastRead_${currentChatTab}_${currentUser}`, Date.now());
                 updateBadgeUI(currentChatTab, 0);
                 initChatListener();
@@ -404,7 +404,7 @@
 
         // --- PEDIDOS ---
         function listenForPedidos() {
-            if(['oficina', 'admin', 'planta'].includes(currentUser)) return;
+            if(!notifyUsers.includes(currentUser) && currentUser !== 'oficina') return;
             unsubAlerts = onValue(query(ref(db, 'pedidos_diarios'), limitToLast(1)), (snap) => {
                 const data = snap.val();
                 if(data) {
@@ -417,16 +417,30 @@
             });
         }
 
-        function showOficinaMenu() { document.getElementById('mainMenuScreen').style.display = 'flex'; renderMenuOptions('oficina'); }
-        function showPlantaScreen() { document.getElementById('mainMenuScreen').style.display = 'none'; document.getElementById('plantaScreen').style.display = 'flex'; loadPedidosPlanta(); }
+        function showOficinaMenu() {
+            document.getElementById('mainMenuScreen').style.display = 'flex';
+            renderMenuOptions('oficina');
+        }
+
+        function showPlantaScreen() {
+            document.getElementById('mainMenuScreen').style.display = 'none';
+            document.getElementById('plantaScreen').style.display = 'flex';
+            loadPedidosPlanta();
+        }
 
         function renderMenuOptions(role) {
             const container = document.getElementById('menuOptions');
             container.innerHTML = '';
             if(role === 'oficina') {
-                container.innerHTML = `<div class="col-md-4"><div class="glass-panel menu-card" onclick="showDashboard()"><i class="bi bi-eye menu-icon"></i><h4>Stock (Ver)</h4></div></div><div class="col-md-4"><div class="glass-panel menu-card" onclick="showPedidoOficinaForm()"><i class="bi bi-cart-plus menu-icon text-success"></i><h4>Pedido Diario</h4></div></div>`;
+                container.innerHTML = `
+                    <div class="col-md-4"><div class="glass-panel menu-card" onclick="showDashboard()"><i class="bi bi-eye menu-icon"></i><h4>Stock (Ver)</h4></div></div>
+                    <div class="col-md-4"><div class="glass-panel menu-card" onclick="showPedidoOficinaForm()"><i class="bi bi-cart-plus menu-icon text-success"></i><h4>Pedido Diario</h4></div></div>
+                `;
             } else if(role === 'taller') {
-                container.innerHTML = `<div class="col-md-4"><div class="glass-panel menu-card" onclick="showDailyForm()"><i class="bi bi-pencil-square menu-icon"></i><h4>Carga Diaria</h4></div></div><div class="col-md-4"><div class="glass-panel menu-card" onclick="showDashboard()"><i class="bi bi-boxes menu-icon text-success"></i><h4>Control Stock</h4></div></div>`;
+                container.innerHTML = `
+                    <div class="col-md-4"><div class="glass-panel menu-card" onclick="showDailyForm()"><i class="bi bi-pencil-square menu-icon"></i><h4>Carga Diaria</h4></div></div>
+                    <div class="col-md-4"><div class="glass-panel menu-card" onclick="showDashboard()"><i class="bi bi-boxes menu-icon text-success"></i><h4>Control Stock</h4></div></div>
+                `;
             }
         }
 
@@ -437,14 +451,26 @@
         };
 
         function loadPedidoItems() {
-            const cont = document.getElementById('pedidoMaquinasList'); cont.innerHTML = '';
+            const cont = document.getElementById('pedidoMaquinasList');
+            cont.innerHTML = '';
             onValue(ref(db, 'items'), (snap) => {
-                const data = snap.val(); if(!data) return;
+                const data = snap.val();
+                if(!data) return;
                 Object.keys(data).forEach(id => {
-                    if(data[id].type === 'dispenser') {
-                        const d = document.createElement('div'); d.className = `repuesto-selector`; d.id = `ped-${id}`;
-                        const cur = selectedPedidosOficina[id] ? selectedPedidosOficina[id].qty : 0;
-                        d.innerHTML = `<span class="rep-name">${data[id].name}</span><div class="rep-controls"><button class="btn-qty" onclick="changePedidoQty('${id}', '${data[id].name}', -1)">-</button><span class="rep-qty" id="ped-qty-${id}">${cur}</span><button class="btn-qty" onclick="changePedidoQty('${id}', '${data[id].name}', 1)">+</button></div>`;
+                    const item = data[id];
+                    if(item.type === 'dispenser') {
+                        const d = document.createElement('div');
+                        d.className = `repuesto-selector`;
+                        d.id = `ped-${id}`;
+                        const currentQty = selectedPedidosOficina[id] ? selectedPedidosOficina[id].qty : 0;
+                        d.innerHTML = `
+                            <span class="rep-name">${item.name}</span>
+                            <div class="rep-controls">
+                                <button class="btn-qty" onclick="changePedidoQty('${id}', '${item.name}', -1)">-</button>
+                                <span class="rep-qty" id="ped-qty-${id}">${currentQty}</span>
+                                <button class="btn-qty" onclick="changePedidoQty('${id}', '${item.name}', 1)">+</button>
+                            </div>
+                        `;
                         cont.appendChild(d);
                     }
                 });
@@ -453,28 +479,53 @@
 
         window.changePedidoQty = (id, name, delta) => {
             if(!selectedPedidosOficina[id]) selectedPedidosOficina[id] = { name, qty: 0 };
-            selectedPedidosOficina[id].qty = Math.max(0, selectedPedidosOficina[id].qty + delta);
-            document.getElementById(`ped-qty-${id}`).innerText = selectedPedidosOficina[id].qty;
-            document.getElementById(`ped-${id}`).classList.toggle('active', selectedPedidosOficina[id].qty > 0);
+            selectedPedidosOficina[id].qty += delta;
+            if(selectedPedidosOficina[id].qty <= 0) {
+                delete selectedPedidosOficina[id];
+                document.getElementById(`ped-qty-${id}`).innerText = '0';
+                document.getElementById(`ped-${id}`).classList.remove('active');
+            } else {
+                document.getElementById(`ped-qty-${id}`).innerText = selectedPedidosOficina[id].qty;
+                document.getElementById(`ped-${id}`).classList.add('active');
+            }
         };
 
         window.savePedidoOficina = async () => {
+            const obs = document.getElementById('pedidoObs').value;
             const itemsArray = Object.values(selectedPedidosOficina).filter(i => i.qty > 0);
             if(itemsArray.length === 0) return alert("Selecciona máquinas");
+            
             const resumen = itemsArray.map(i => `${i.name} (x${i.qty})`).join(', ');
-            const pedidoObj = { user: 'OFICINA', resumen: resumen, obs: document.getElementById('pedidoObs').value, timestamp: Date.now(), date: new Date().toLocaleString() };
+            const pedidoObj = { user: 'OFICINA', resumen: resumen, obs: obs, timestamp: Date.now(), date: new Date().toLocaleString() };
+
             await push(ref(db, 'pedidos_diarios'), pedidoObj);
-            await push(ref(db, 'pedidos_chat'), { user: 'SISTEMA', text: `📢 NUEVO PEDIDO: ${resumen}`, timestamp: Date.now() });
+            // REGISTRO EN CHAT PEDIDOS
+            await push(ref(db, 'pedidos_chat'), { user: 'SISTEMA', text: `📢 NUEVO PEDIDO: ${resumen}. Obs: ${pedidoObj.obs}`, timestamp: Date.now() });
+            
+            // REGISTRO EN CHAT GLOBAL PARA AVISAR A ADMIN Y PLANTA
             await push(ref(db, 'chat'), { user: 'SISTEMA', text: `🔔 NUEVO PEDIDO OFICINA: ${resumen}`, timestamp: Date.now() });
-            alert("Pedido enviado correctamente"); backToMenu();
+
+            alert("Pedido enviado correctamente");
+            selectedPedidosOficina = {};
+            document.getElementById('pedidoObs').value = '';
+            backToMenu();
         };
 
         function loadPedidosPlanta() {
-            onValue(query(ref(db, 'pedidos_diarios'), limitToLast(10)), (snap) => {
-                const cont = document.getElementById('plantaPedidosList'); cont.innerHTML = '';
-                const data = snap.val(); if(!data) return;
+            if(unsubPedidosPlanta) unsubPedidosPlanta();
+            unsubPedidosPlanta = onValue(query(ref(db, 'pedidos_diarios'), limitToLast(10)), (snap) => {
+                const cont = document.getElementById('plantaPedidosList');
+                cont.innerHTML = '';
+                const data = snap.val();
+                if(!data) { cont.innerHTML = '<p class="text-muted">No hay pedidos recientes.</p>'; return; }
                 Object.values(data).sort((a,b) => b.timestamp - a.timestamp).forEach(p => {
-                    cont.innerHTML += `<div class="alert alert-light border shadow-sm"><strong>${p.date}</strong><br>Máquinas: ${p.resumen}<br><small>Obs: ${p.obs || '-'}</small></div>`;
+                    cont.innerHTML += `
+                        <div class="alert alert-light border shadow-sm">
+                            <div class="d-flex justify-content-between"><strong>Pedido Oficina</strong> <span class="small text-muted">${p.date}</span></div>
+                            <div class="mt-2"><strong>Máquinas:</strong> ${p.resumen}</div>
+                            <div class="small italic text-secondary">Obs: ${p.obs || '-'}</div>
+                        </div>
+                    `;
                 });
             });
         }
@@ -483,14 +534,21 @@
             const txt = document.getElementById('plantaMsg').value; if(!txt) return;
             await push(ref(db, 'pedidos_chat'), { user: 'PLANTA', text: txt, timestamp: Date.now() });
             document.getElementById('plantaMsg').value = '';
+            alert("Mensaje enviado al chat de Pedidos.");
         };
 
-        // --- STOCK & TALLER ---
+        // --- TALLER ---
         window.showDailyForm = () => {
             document.getElementById('mainMenuScreen').style.display = 'none';
             document.getElementById('tallerFormScreen').style.display = 'flex';
-            const op = document.getElementById('reportOperator');
-            if (restrictedUsers.includes(currentUser)) { op.value = currentUser; op.readOnly = true; }
+            const operatorInput = document.getElementById('reportOperator');
+            if (restrictedUsers.includes(currentUser)) {
+                operatorInput.value = currentUser.charAt(0).toUpperCase() + currentUser.slice(1);
+                operatorInput.readOnly = true;
+            } else {
+                operatorInput.value = "";
+                operatorInput.readOnly = false;
+            }
             updateTime(); loadFormSync(); loadTallerHistory();
         };
 
@@ -507,28 +565,42 @@
             document.getElementById('dashboardScreen').style.display = 'none';
             document.getElementById('oficinaPedidoScreen').style.display = 'none';
             document.getElementById('plantaScreen').style.display = 'none';
+
             if(currentUser === 'admin') document.getElementById('adminScreen').style.display = 'flex';
             else if(currentUser === 'planta') document.getElementById('plantaScreen').style.display = 'flex';
             else document.getElementById('mainMenuScreen').style.display = 'flex';
         };
 
-        function updateTime() { document.getElementById('reportDate').value = new Date().toLocaleString(); }
+        function updateTime() {
+            const now = new Date();
+            document.getElementById('reportDate').value = now.toLocaleDateString('es-AR') + ' ' + now.toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'});
+        }
 
         function loadFormSync() {
-            onValue(ref(db, 'items'), (snap) => {
+            if(unsubRep) unsubRep();
+            unsubRep = onValue(ref(db, 'items'), (snap) => {
                 const data = snap.val(); globalItems = data || {};
                 const contRep = document.getElementById('repuestosChecklist');
                 const selectMaq = document.getElementById('reportMachineType');
-                contRep.innerHTML = ''; selectMaq.innerHTML = '<option value="" disabled selected>Seleccionar Máquina</option>';
+                contRep.innerHTML = '';
+                selectMaq.innerHTML = '<option value="" disabled selected>Seleccionar Máquina (+1 al stock)</option>';
                 if(!data) return;
                 Object.keys(data).forEach(id => {
                     const item = data[id];
                     if(item.type === 'repuesto') {
-                        const d = document.createElement('div'); d.className = 'repuesto-selector'; d.id = `rs-${id}`;
-                        d.innerHTML = `<span class="rep-name">${item.name}</span><div class="rep-controls"><button class="btn-qty" onclick="changeRepQty('${id}', -1)">-</button><span class="rep-qty" id="rq-${id}">0</span><button class="btn-qty" onclick="changeRepQty('${id}', 1)">+</button></div>`;
+                        const d = document.createElement('div'); 
+                        d.className = `repuesto-selector`; d.id = `rs-${id}`;
+                        d.innerHTML = `<span class="rep-name">${item.name}</span>
+                            <div class="rep-controls">
+                                <button class="btn-qty" onclick="changeRepQty('${id}', -1)">-</button>
+                                <span class="rep-qty" id="rq-${id}">0</span>
+                                <button class="btn-qty" onclick="changeRepQty('${id}', 1)">+</button>
+                            </div>`;
                         contRep.appendChild(d);
                     } else if(item.type === 'dispenser') {
-                        const opt = document.createElement('option'); opt.value = item.name; opt.innerText = item.name; selectMaq.appendChild(opt);
+                        const opt = document.createElement('option');
+                        opt.value = item.name; opt.innerText = item.name;
+                        selectMaq.appendChild(opt);
                     }
                 });
             });
@@ -545,41 +617,101 @@
             const op = document.getElementById('reportOperator').value;
             const mc = document.getElementById('reportMachineType').value;
             const ac = document.getElementById('reportActivity').value;
-            if(!op || !mc || !ac) return alert("Faltan datos");
+            if(!op || !mc || !ac) return alert("Completa Operario, Máquina y Actividad");
+            const btn = document.getElementById('btnSaveReport'); btn.disabled = true;
+
             try {
-                const reps = Object.values(selectedRepuestos).filter(r => r.qty > 0).map(r => `${r.name} (x${r.qty})`).join(', ');
-                await push(ref(db, 'taller_reports'), { date: document.getElementById('reportDate').value, operator: op, machine: mc, activity: ac, observations: document.getElementById('reportObs').value, repuestos: reps || 'Ninguno', timestamp: Date.now() });
+                const repArray = Object.values(selectedRepuestos).filter(r => r.qty > 0);
+                const repDetailed = repArray.length > 0 ? repArray.map(r => `${r.name} (x${r.qty})`).join(', ') : 'Ninguno';
+                
+                await push(ref(db, 'taller_reports'), { 
+                    date: document.getElementById('reportDate').value, operator: op, machine: mc, activity: ac, observations: document.getElementById('reportObs').value, repuestos: repDetailed, timestamp: Date.now() 
+                });
+
+                // LÓGICA STOCK: Dispenser Natural resta, el resto suma
                 let mId = Object.keys(globalItems).find(id => globalItems[id].name === mc);
-                if(mId) await update(ref(db, `items/${mId}`), { qty: globalItems[mId].qty + (mc.includes("Natural") ? -1 : 1) });
-                for(let id in selectedRepuestos) if(selectedRepuestos[id].qty > 0) await update(ref(db, `items/${id}`), { qty: Math.max(0, globalItems[id].qty - selectedRepuestos[id].qty) });
-                alert("✅ Éxito"); backToMenu();
-            } catch (e) { alert("Error"); }
+                if(mId) {
+                    const delta = mc.toLowerCase().includes("dispenser natural") ? -1 : 1;
+                    await update(ref(db, `items/${mId}`), { qty: Math.max(0, globalItems[mId].qty + delta) });
+                }
+
+                if (restrictedUsers.includes(currentUser)) {
+                    let repairId = Object.keys(globalItems).find(id => globalItems[id].name.trim().toLowerCase().includes("reparar"));
+                    if (repairId) await update(ref(db, `items/${repairId}`), { qty: Math.max(0, globalItems[repairId].qty - 1) });
+                }
+
+                for(let id in selectedRepuestos) {
+                    if(selectedRepuestos[id].qty > 0) await update(ref(db, `items/${id}`), { qty: Math.max(0, globalItems[id].qty - selectedRepuestos[id].qty) });
+                }
+
+                alert("¡Carga terminada con éxito! ✅");
+                backToMenu();
+            } catch (e) { alert("Error: " + e.message); btn.disabled = false; }
         };
 
         function loadItems() {
-            onValue(ref(db, 'items'), (snap) => {
+            if(unsubItems) unsubItems();
+            unsubItems = onValue(ref(db, 'items'), (snap) => {
                 const cont = document.getElementById('itemsContainer'); cont.innerHTML = '';
+                const data = snap.val(); globalItems = data || {};
+                if(data) Object.keys(data).forEach(id => renderItem(id, data[id]));
+            });
+        }
+
+        function renderItem(id, item) {
+            let canEdit = (currentUser === 'admin' || (currentUser === 'Facu' && item.name.toLowerCase().includes("reparar")));
+            const card = document.createElement('div'); card.className = 'col-md-4 item-card-wrapper';
+            card.setAttribute('data-name', item.name.toLowerCase());
+            const controlsHtml = canEdit ?
+                `<button class="btn btn-circle btn-outline-danger shadow-sm" onclick="updateStock('${id}', ${item.qty}, -1, '${item.name}')">-</button>
+                 <span class="fs-4 fw-bold">${item.qty}</span>
+                 <button class="btn btn-circle btn-outline-success shadow-sm" onclick="updateStock('${id}', ${item.qty}, 1, '${item.name}')">+</button>` :
+                `<span class="fs-4 fw-bold w-100 text-center">${item.qty}</span>`;
+
+            card.innerHTML = `
+                <div class="glass-panel stock-card shadow-sm">
+                    <div class="d-flex justify-content-between"><h6 class="fw-bold">${item.name}</h6>
+                    ${currentUser === 'admin' ? `<button onclick="deleteItem('${id}', '${item.name}')" class="btn text-danger btn-sm p-0"><i class="bi bi-trash"></i></button>` : ''}</div>
+                    <div class="d-flex justify-content-between align-items-center mt-3 p-2 bg-white rounded-3">${controlsHtml}</div>
+                </div>`;
+            document.getElementById('itemsContainer').appendChild(card);
+        }
+
+        window.updateStock = (id, cur, amt, name) => {
+            if(cur + amt < 0) return;
+            update(ref(db, `items/${id}`), { qty: cur + amt });
+            push(ref(db, 'history'), { type: 'manual', user: currentUser.toUpperCase(), desc: `${amt>0?'Sumó':'Restó'} ${Math.abs(amt)} a ${name}`, date: new Date().toLocaleString(), timestamp: Date.now() });
+        };
+
+        function loadTallerHistory() {
+            onValue(query(ref(db, 'taller_reports'), limitToLast(12)), snap => {
+                const list = document.getElementById('tallerHistoryList'); list.innerHTML = '';
                 const data = snap.val(); if(!data) return;
-                Object.keys(data).forEach(id => {
-                    let item = data[id];
-                    let canEdit = (currentUser === 'admin' || (currentUser === 'Facu' && item.name.toLowerCase().includes("reparar")));
-                    const card = document.createElement('div'); card.className = 'col-md-4 item-card-wrapper';
-                    card.setAttribute('data-name', item.name.toLowerCase());
-                    const controls = canEdit ? `<button class="btn btn-circle btn-outline-danger shadow-sm" onclick="updateStock('${id}', ${item.qty}, -1, '${item.name}')">-</button><span class="fs-4 fw-bold">${item.qty}</span><button class="btn btn-circle btn-outline-success shadow-sm" onclick="updateStock('${id}', ${item.qty}, 1, '${item.name}')">+</button>` : `<span class="fs-4 fw-bold w-100 text-center">${item.qty}</span>`;
-                    card.innerHTML = `<div class="glass-panel stock-card shadow-sm"><div class="d-flex justify-content-between"><h6 class="fw-bold">${item.name}</h6>${currentUser === 'admin' ? `<button onclick="deleteItem('${id}', '${item.name}')" class="btn text-danger btn-sm p-0"><i class="bi bi-trash"></i></button>` : ''}</div><div class="d-flex justify-content-between align-items-center mt-3 p-2 bg-white rounded-3">${controls}</div></div>`;
-                    cont.appendChild(card);
+                Object.values(data).sort((a,b) => b.timestamp - a.timestamp).forEach(i => {
+                    list.innerHTML += `<div class="history-box taller"><b>${i.operator}</b> - ${i.machine}<br><small>${i.date}</small></div>`;
                 });
             });
         }
 
-        window.updateStock = (id, cur, amt, name) => {
-            update(ref(db, `items/${id}`), { qty: Math.max(0, cur + amt) });
-            push(ref(db, 'history'), { user: currentUser.toUpperCase(), desc: `${amt>0?'Sumó':'Restó'} ${Math.abs(amt)} a ${name}`, date: new Date().toLocaleString(), timestamp: Date.now() });
-        };
+        window.loadHistory = () => {
+            onValue(query(ref(db, 'history'), limitToLast(20)), snap => {
+                const cont = document.getElementById('historyContainer'); cont.innerHTML = '';
+                const data = snap.val(); if(!data) return;
+                Object.values(data).sort((a,b) => b.timestamp - a.timestamp).forEach(l => {
+                    cont.innerHTML += `<div class="history-box manual"><b>${l.user}</b>: ${l.desc}<br><small>${l.date}</small></div>`;
+                });
+            });
+        }
 
-        function loadTallerHistory() { onValue(query(ref(db, 'taller_reports'), limitToLast(12)), snap => { const list = document.getElementById('tallerHistoryList'); list.innerHTML = ''; const data = snap.val(); if(!data) return; Object.values(data).sort((a,b) => b.timestamp - a.timestamp).forEach(i => { list.innerHTML += `<div class="history-box taller"><b>${i.operator}</b> - ${i.machine}<br><small>${i.date}</small></div>`; }); }); }
-        window.loadHistory = () => { onValue(query(ref(db, 'history'), limitToLast(20)), snap => { const cont = document.getElementById('historyContainer'); cont.innerHTML = ''; const data = snap.val(); if(!data) return; Object.values(data).sort((a,b) => b.timestamp - a.timestamp).forEach(l => { cont.innerHTML += `<div class="history-box manual"><b>${l.user}</b>: ${l.desc}<br><small>${l.date}</small></div>`; }); }); }
-        window.loadAdminHistory = () => { onValue(ref(db, 'taller_reports'), snap => { const tbody = document.getElementById('adminReportsTable'); tbody.innerHTML = ''; const data = snap.val(); if(!data) return; Object.values(data).sort((a,b) => b.timestamp - a.timestamp).forEach(i => { tbody.innerHTML += `<tr><td>${i.date}</td><td>${i.operator}</td><td>${i.machine}</td><td>${i.activity}</td><td>${i.repuestos}</td><td>${i.observations || ''}</td></tr>`; }); }); };
+        window.loadAdminHistory = () => {
+            onValue(ref(db, 'taller_reports'), snap => {
+                const tbody = document.getElementById('adminReportsTable'); tbody.innerHTML = '';
+                const data = snap.val(); if(!data) return;
+                Object.values(data).sort((a,b) => b.timestamp - a.timestamp).forEach(i => {
+                    tbody.innerHTML += `<tr><td>${i.date}</td><td>${i.operator}</td><td>${i.machine}</td><td>${i.activity}</td><td>${i.repuestos}</td><td>${i.observations || ''}</td></tr>`;
+                });
+            });
+        };
 
         window.addNewItem = () => {
             push(ref(db, 'items'), { name: document.getElementById('newItemName').value, type: document.getElementById('newItemType').value, qty: parseInt(document.getElementById('newItemQty').value)||0 });
@@ -587,7 +719,10 @@
         };
 
         window.deleteItem = (id, n) => confirm(`¿Borrar ${n}?`) && remove(ref(db, `items/${id}`));
-        window.filterItems = () => { const t = document.getElementById('searchInput').value.toLowerCase(); document.querySelectorAll('.item-card-wrapper').forEach(c => c.style.display = c.dataset.name.includes(t)?'block':'none'); };
+        window.filterItems = () => {
+            const t = document.getElementById('searchInput').value.toLowerCase();
+            document.querySelectorAll('.item-card-wrapper').forEach(c => c.style.display = c.dataset.name.includes(t)?'block':'none');
+        };
 
         const script = document.createElement('script'); script.src = "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"; document.body.appendChild(script);
     </script>
