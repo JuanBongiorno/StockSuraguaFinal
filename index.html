@@ -40,11 +40,11 @@
         .chat-msg b { color: #007bff; display: block; font-size: 0.72rem; }
         .chat-msg.pedido-log { background: #fff4e5; border-left: 3px solid #ffa000; }
         #chat-input-area { display: flex; background: white; border-radius: 0 0 15px 15px; border-top: 1px solid #ddd; padding: 8px; }
-        #chat-toggle { width: 100%; border-radius: 20px; font-weight: bold; margin-top: 5px; transition: 0.3s; position: relative; }
+        #chat-toggle { width: 100%; border-radius: 20px; font-weight: bold; margin-top: 5px; position: relative; }
 
-        /* Punto de notificación */
-        .notif-dot { position: absolute; top: 5px; right: 10px; width: 8px; height: 8px; background: #ff3b30; border-radius: 50%; display: none; }
-        .chat-tab .notif-dot { top: 12px; right: 15px; }
+        /* Badge de Notificación WhatsApp Style */
+        .badge-notif { position: absolute; top: -5px; right: -5px; background: #ff3b30; color: white; border-radius: 50%; padding: 2px 6px; font-size: 0.7rem; min-width: 18px; text-align: center; display: none; border: 2px solid white; }
+        .chat-tab .badge-notif { top: 2px; right: 5px; position: absolute; }
 
         /* Alerta de Pedidos */
         #pedido-alert-container { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); width: 90%; max-width: 600px; z-index: 2000; display: none; }
@@ -68,7 +68,7 @@
 </head>
 <body>
 
-    <!-- NOTIFICACIÓN DE PEDIDO AMARILLA (SOLO PARA OPERARIOS) -->
+    <!-- NOTIFICACIÓN DE PEDIDO -->
     <div id="pedido-alert-container">
         <div class="pedido-notif">
             <div class="d-flex justify-content-between align-items-start">
@@ -229,8 +229,12 @@
     <div id="chat-container">
         <div id="chat-window">
             <div class="chat-tabs">
-                <div id="tab-global" class="chat-tab active" onclick="switchChat('global')">GLOBAL <span id="dot-global" class="notif-dot"></span></div>
-                <div id="tab-pedidos" class="chat-tab" onclick="switchChat('pedidos')">PEDIDOS <span id="dot-pedidos" class="notif-dot"></span></div>
+                <div id="tab-global" class="chat-tab active" onclick="switchChat('global')">
+                    GLOBAL <span id="count-global" class="badge-notif">0</span>
+                </div>
+                <div id="tab-pedidos" class="chat-tab" onclick="switchChat('pedidos')">
+                    PEDIDOS <span id="count-pedidos" class="badge-notif">0</span>
+                </div>
             </div>
             <div id="chat-box-messages"></div>
             <div id="chat-input-area">
@@ -239,7 +243,7 @@
             </div>
         </div>
         <button id="chat-toggle" class="btn btn-primary shadow" onclick="toggleChat()">
-            <i class="bi bi-chat-dots"></i> CHAT SURAGUA
+            <i class="bi bi-chat-dots"></i> CHAT SURAGUA <span id="count-total" class="badge-notif">0</span>
         </button>
     </div>
 
@@ -260,11 +264,7 @@
         let globalItems = {};
         let selectedRepuestos = {}; 
         let selectedPedidosOficina = {};
-        
-        // Unsubs y estados de notificacion
         let unsubChat, unsubAlerts, unsubTaller, unsubItems, unsubHistory, unsubAdmin, unsubRep, unsubPedidosPlanta;
-        let unreadGlobal = false;
-        let unreadPedidos = false;
 
         const credentials = { 
             oficina: "Broncel3876", 
@@ -278,6 +278,10 @@
         const restrictedUsers = ['mauro', 'javier', 'facundo', 'Facu'];
         const notifyUsers = ['Facu', 'javier', 'facundo', 'planta', 'admin'];
 
+        // ENTER KEY LISTENERS
+        document.getElementById('passwordInput').addEventListener('keypress', (e) => { if(e.key === 'Enter') login(); });
+        document.getElementById('chat-input').addEventListener('keypress', (e) => { if(e.key === 'Enter') sendChatMessage(); });
+
         window.login = () => {
             const u = document.getElementById('usernameInput').value;
             const p = document.getElementById('passwordInput').value;
@@ -288,7 +292,7 @@
                 
                 document.getElementById('chat-container').style.display = 'block';
                 switchChat('global');
-                startChatBackgroundListeners(); // Iniciar monitoreo de ambos chats
+                initNotifListeners();
                 listenForPedidos();
                 
                 if(u === 'admin') { 
@@ -309,65 +313,58 @@
 
         window.logout = () => location.reload();
 
-        // --- CHAT DUAL CON NOTIFICACIONES ---
-        
-        // Listener de fondo para detectar mensajes en ambos chats simultáneamente
-        function startChatBackgroundListeners() {
-            // Escuchar Chat Global
-            onValue(query(ref(db, 'chat'), limitToLast(1)), (snap) => {
+        // --- NOTIFICACIONES WHATSAPP STYLE ---
+        function initNotifListeners() {
+            // Global
+            onValue(ref(db, 'chat'), (snap) => {
                 const data = snap.val();
-                if(data) {
-                    const msg = Object.values(data)[0];
-                    // Si el chat está cerrado O estamos en la pestaña de pedidos, marcar global como no leído
-                    const isChatClosed = document.getElementById('chat-window').style.display !== 'flex';
-                    if ( (isChatClosed || currentChatTab !== 'global') && Date.now() - msg.timestamp < 5000) {
-                        unreadGlobal = true;
-                        updateNotifUI();
-                    }
-                }
+                if(!data) return;
+                const lastRead = parseInt(localStorage.getItem(`lastRead_global_${currentUser}`)) || 0;
+                let count = 0;
+                Object.values(data).forEach(m => { if(m.timestamp > lastRead) count++; });
+                updateBadge('global', count);
             });
-
-            // Escuchar Chat Pedidos
-            onValue(query(ref(db, 'pedidos_chat'), limitToLast(1)), (snap) => {
+            // Pedidos
+            onValue(ref(db, 'pedidos_chat'), (snap) => {
                 const data = snap.val();
-                if(data) {
-                    const msg = Object.values(data)[0];
-                    // Si el chat está cerrado O estamos en la pestaña global, marcar pedidos como no leído
-                    const isChatClosed = document.getElementById('chat-window').style.display !== 'flex';
-                    if ( (isChatClosed || currentChatTab !== 'pedidos') && Date.now() - msg.timestamp < 5000) {
-                        unreadPedidos = true;
-                        updateNotifUI();
-                    }
-                }
+                if(!data) return;
+                const lastRead = parseInt(localStorage.getItem(`lastRead_pedidos_${currentUser}`)) || 0;
+                let count = 0;
+                Object.values(data).forEach(m => { if(m.timestamp > lastRead) count++; });
+                updateBadge('pedidos', count);
             });
         }
 
-        function updateNotifUI() {
-            const btn = document.getElementById('chat-toggle');
-            const dotG = document.getElementById('dot-global');
-            const dotP = document.getElementById('dot-pedidos');
-
-            // Mostrar puntos rojos en las pestañas
-            dotG.style.display = unreadGlobal ? 'block' : 'none';
-            dotP.style.display = unreadPedidos ? 'block' : 'none';
-
-            // Si hay algo sin leer en CUALQUIERA de los dos, poner botón rojo
-            if (unreadGlobal || unreadPedidos) {
-                btn.classList.replace('btn-primary', 'btn-danger');
+        function updateBadge(type, count) {
+            const el = document.getElementById(`count-${type}`);
+            if(count > 0) {
+                el.innerText = count > 99 ? '99+' : count;
+                el.style.display = 'block';
             } else {
-                btn.classList.replace('btn-danger', 'btn-primary');
+                el.style.display = 'none';
+            }
+            // Update total
+            const g = parseInt(document.getElementById('count-global').innerText) || 0;
+            const p = parseInt(document.getElementById('count-pedidos').innerText) || 0;
+            const total = (document.getElementById('count-global').style.display === 'block' ? g : 0) + 
+                          (document.getElementById('count-pedidos').style.display === 'block' ? p : 0);
+            
+            const totalEl = document.getElementById('count-total');
+            if(total > 0) {
+                totalEl.innerText = total;
+                totalEl.style.display = 'block';
+            } else {
+                totalEl.style.display = 'none';
             }
         }
 
+        // --- CHAT DUAL ---
         window.switchChat = (tab) => {
             currentChatTab = tab;
-            if(tab === 'global') unreadGlobal = false;
-            if(tab === 'pedidos') unreadPedidos = false;
-            
+            localStorage.setItem(`lastRead_${tab}_${currentUser}`, Date.now());
             document.querySelectorAll('.chat-tab').forEach(t => t.classList.remove('active'));
             document.getElementById('tab-' + tab).classList.add('active');
-            
-            updateNotifUI();
+            document.getElementById(`count-${tab}`).style.display = 'none';
             initChatListener();
         };
 
@@ -375,13 +372,19 @@
             if(unsubChat) unsubChat();
             const path = currentChatTab === 'global' ? 'chat' : 'pedidos_chat';
             unsubChat = onValue(query(ref(db, path), limitToLast(30)), (snap) => {
-                const box = document.getElementById('chat-box-messages'); box.innerHTML = '';
+                const box = document.getElementById('chat-box-messages'); 
+                box.innerHTML = '';
                 const data = snap.val();
-                if(data) Object.values(data).sort((a,b) => a.timestamp - b.timestamp).forEach(m => {
-                    const isPedido = m.text.includes("NUEVO PEDIDO") || m.text.includes("🔔");
-                    box.innerHTML += `<div class="chat-msg ${isPedido?'pedido-log':''}"><b>${m.user}</b>${m.text}</div>`;
-                });
+                if(data) {
+                    Object.values(data).sort((a,b) => a.timestamp - b.timestamp).forEach(m => {
+                        const isPedido = m.text.includes("NUEVO PEDIDO") || m.text.includes("🔔");
+                        box.innerHTML += `<div class="chat-msg ${isPedido?'pedido-log':''}"><b>${m.user}</b>${m.text}</div>`;
+                    });
+                }
                 box.scrollTop = box.scrollHeight;
+                if(document.getElementById('chat-window').style.display === 'flex') {
+                    localStorage.setItem(`lastRead_${currentChatTab}_${currentUser}`, Date.now());
+                }
             });
         }
 
@@ -395,20 +398,15 @@
         window.toggleChat = () => {
             const w = document.getElementById('chat-window');
             w.style.display = w.style.display === 'flex' ? 'none' : 'flex';
-            
-            // Si abrimos el chat, limpiamos la notificación de la pestaña que estamos viendo
-            if (w.style.display === 'flex') {
-                if(currentChatTab === 'global') unreadGlobal = false;
-                if(currentChatTab === 'pedidos') unreadPedidos = false;
-                updateNotifUI();
+            if(w.style.display === 'flex') {
+                localStorage.setItem(`lastRead_${currentChatTab}_${currentUser}`, Date.now());
+                updateBadge(currentChatTab, 0);
             }
         };
 
         // --- PEDIDOS ---
         function listenForPedidos() {
-            // No mostrar la alerta amarilla a oficina, planta ni admin (ellos ven el chat)
-            if(['oficina', 'planta', 'admin'].includes(currentUser)) return;
-
+            if(['oficina', 'admin', 'planta'].includes(currentUser)) return;
             unsubAlerts = onValue(query(ref(db, 'pedidos_diarios'), limitToLast(1)), (snap) => {
                 const data = snap.val();
                 if(data) {
@@ -500,22 +498,12 @@
             if(itemsArray.length === 0) return alert("Selecciona máquinas");
             
             const resumen = itemsArray.map(i => `${i.name} (x${i.qty})`).join(', ');
-            const pedidoObj = {
-                user: 'OFICINA',
-                resumen: resumen,
-                obs: obs,
-                timestamp: Date.now(),
-                date: new Date().toLocaleString()
-            };
+            const pedidoObj = { user: 'OFICINA', resumen: resumen, obs: obs, timestamp: Date.now(), date: new Date().toLocaleString() };
 
             await push(ref(db, 'pedidos_diarios'), pedidoObj);
-            
-            // 1. REGISTRO EN CHAT PEDIDOS (Para que salga la notificación en esa pestaña)
             await push(ref(db, 'pedidos_chat'), { user: 'SISTEMA', text: `📢 NUEVO PEDIDO: ${resumen}. Obs: ${pedidoObj.obs}`, timestamp: Date.now() });
+            await push(ref(db, 'chat'), { user: 'SISTEMA', text: `🔔 NUEVO PEDIDO DE OFICINA: ${resumen}`, timestamp: Date.now() });
             
-            // 2. REGISTRO EN CHAT GLOBAL (Para que salga la notificación general a Admin y Planta)
-            await push(ref(db, 'chat'), { user: 'SISTEMA', text: `🔔 NUEVO PEDIDO CARGADO: ${resumen}`, timestamp: Date.now() });
-
             alert("Pedido enviado correctamente");
             selectedPedidosOficina = {};
             document.getElementById('pedidoObs').value = '';
@@ -528,15 +516,9 @@
                 const cont = document.getElementById('plantaPedidosList');
                 cont.innerHTML = '';
                 const data = snap.val();
-                if(!data) { cont.innerHTML = '<p class="text-muted">No hay pedidos recientes.</p>'; return; }
+                if(!data) return;
                 Object.values(data).sort((a,b) => b.timestamp - a.timestamp).forEach(p => {
-                    cont.innerHTML += `
-                        <div class="alert alert-light border shadow-sm">
-                            <div class="d-flex justify-content-between"><strong>Pedido Oficina</strong> <span class="small text-muted">${p.date}</span></div>
-                            <div class="mt-2"><strong>Máquinas:</strong> ${p.resumen}</div>
-                            <div class="small italic text-secondary">Obs: ${p.obs || '-'}</div>
-                        </div>
-                    `;
+                    cont.innerHTML += `<div class="alert alert-light border shadow-sm"><div class="d-flex justify-content-between"><strong>Pedido Oficina</strong> <span class="small text-muted">${p.date}</span></div><div class="mt-2"><strong>Máquinas:</strong> ${p.resumen}</div><div class="small italic text-secondary">Obs: ${p.obs || '-'}</div></div>`;
                 });
             });
         }
@@ -545,7 +527,6 @@
             const txt = document.getElementById('plantaMsg').value; if(!txt) return;
             await push(ref(db, 'pedidos_chat'), { user: 'PLANTA', text: txt, timestamp: Date.now() });
             document.getElementById('plantaMsg').value = '';
-            alert("Mensaje enviado al chat de Pedidos.");
         };
 
         // --- TALLER ---
@@ -556,10 +537,7 @@
             if (restrictedUsers.includes(currentUser)) {
                 operatorInput.value = currentUser.charAt(0).toUpperCase() + currentUser.slice(1);
                 operatorInput.readOnly = true;
-            } else {
-                operatorInput.value = "";
-                operatorInput.readOnly = false;
-            }
+            } else { operatorInput.value = ""; operatorInput.readOnly = false; }
             updateTime(); loadFormSync(); loadTallerHistory();
         };
 
@@ -576,7 +554,6 @@
             document.getElementById('dashboardScreen').style.display = 'none';
             document.getElementById('oficinaPedidoScreen').style.display = 'none';
             document.getElementById('plantaScreen').style.display = 'none';
-
             if(currentUser === 'admin') document.getElementById('adminScreen').style.display = 'flex';
             else if(currentUser === 'planta') document.getElementById('plantaScreen').style.display = 'flex';
             else document.getElementById('mainMenuScreen').style.display = 'flex';
@@ -599,18 +576,11 @@
                 Object.keys(data).forEach(id => {
                     const item = data[id];
                     if(item.type === 'repuesto') {
-                        const d = document.createElement('div'); 
-                        d.className = `repuesto-selector`; d.id = `rs-${id}`;
-                        d.innerHTML = `<span class="rep-name">${item.name}</span>
-                            <div class="rep-controls">
-                                <button class="btn-qty" onclick="changeRepQty('${id}', -1)">-</button>
-                                <span class="rep-qty" id="rq-${id}">0</span>
-                                <button class="btn-qty" onclick="changeRepQty('${id}', 1)">+</button>
-                            </div>`;
+                        const d = document.createElement('div'); d.className = `repuesto-selector`; d.id = `rs-${id}`;
+                        d.innerHTML = `<span class="rep-name">${item.name}</span><div class="rep-controls"><button class="btn-qty" onclick="changeRepQty('${id}', -1)">-</button><span class="rep-qty" id="rq-${id}">0</span><button class="btn-qty" onclick="changeRepQty('${id}', 1)">+</button></div>`;
                         contRep.appendChild(d);
                     } else if(item.type === 'dispenser') {
-                        const opt = document.createElement('option');
-                        opt.value = item.name; opt.innerText = item.name;
+                        const opt = document.createElement('option'); opt.value = item.name; opt.innerText = item.name;
                         selectMaq.appendChild(opt);
                     }
                 });
@@ -629,37 +599,26 @@
             const mc = document.getElementById('reportMachineType').value;
             const ac = document.getElementById('reportActivity').value;
             if(!op || !mc || !ac) return alert("Completa Operario, Máquina y Actividad");
-            const btn = document.getElementById('btnSaveReport'); btn.disabled = true;
-
             try {
                 const repArray = Object.values(selectedRepuestos).filter(r => r.qty > 0);
                 const repDetailed = repArray.length > 0 ? repArray.map(r => `${r.name} (x${r.qty})`).join(', ') : 'Ninguno';
-                
-                await push(ref(db, 'taller_reports'), { 
-                    date: document.getElementById('reportDate').value, operator: op, machine: mc, activity: ac, observations: document.getElementById('reportObs').value, repuestos: repDetailed, timestamp: Date.now() 
-                });
-
+                await push(ref(db, 'taller_reports'), { date: document.getElementById('reportDate').value, operator: op, machine: mc, activity: ac, observations: document.getElementById('reportObs').value, repuestos: repDetailed, timestamp: Date.now() });
                 let mId = Object.keys(globalItems).find(id => globalItems[id].name === mc);
                 if(mId) {
                     const delta = mc.toLowerCase().includes("dispenser natural") ? -1 : 1;
                     await update(ref(db, `items/${mId}`), { qty: Math.max(0, globalItems[mId].qty + delta) });
                 }
-
                 if (restrictedUsers.includes(currentUser)) {
                     let repairId = Object.keys(globalItems).find(id => globalItems[id].name.trim().toLowerCase().includes("reparar"));
                     if (repairId) await update(ref(db, `items/${repairId}`), { qty: Math.max(0, globalItems[repairId].qty - 1) });
                 }
-
                 for(let id in selectedRepuestos) {
                     if(selectedRepuestos[id].qty > 0) await update(ref(db, `items/${id}`), { qty: Math.max(0, globalItems[id].qty - selectedRepuestos[id].qty) });
                 }
-
-                alert("¡Carga terminada con éxito! ✅");
-                backToMenu();
-            } catch (e) { alert("Error: " + e.message); btn.disabled = false; }
+                alert("✅ Éxito"); backToMenu();
+            } catch (e) { alert("Error"); }
         };
 
-        // --- STOCK PERMISOS ---
         function loadItems() {
             if(unsubItems) unsubItems();
             unsubItems = onValue(ref(db, 'items'), (snap) => {
@@ -670,24 +629,13 @@
         }
 
         function renderItem(id, item) {
-            let canEdit = false;
-            if(currentUser === 'admin') canEdit = true;
-            if(currentUser === 'Facu' && item.name.toLowerCase().includes("reparar")) canEdit = true;
-
+            let canEdit = (currentUser === 'admin' || (currentUser === 'Facu' && item.name.toLowerCase().includes("reparar")));
             const card = document.createElement('div'); card.className = 'col-md-4 item-card-wrapper';
             card.setAttribute('data-name', item.name.toLowerCase());
             const controlsHtml = canEdit ?
-                `<button class="btn btn-circle btn-outline-danger shadow-sm" onclick="updateStock('${id}', ${item.qty}, -1, '${item.name}')">-</button>
-                 <span class="fs-4 fw-bold">${item.qty}</span>
-                 <button class="btn btn-circle btn-outline-success shadow-sm" onclick="updateStock('${id}', ${item.qty}, 1, '${item.name}')">+</button>` :
+                `<button class="btn btn-circle btn-outline-danger shadow-sm" onclick="updateStock('${id}', ${item.qty}, -1, '${item.name}')">-</button><span class="fs-4 fw-bold">${item.qty}</span><button class="btn btn-circle btn-outline-success shadow-sm" onclick="updateStock('${id}', ${item.qty}, 1, '${item.name}')">+</button>` :
                 `<span class="fs-4 fw-bold w-100 text-center">${item.qty}</span>`;
-
-            card.innerHTML = `
-                <div class="glass-panel stock-card shadow-sm">
-                    <div class="d-flex justify-content-between"><h6 class="fw-bold">${item.name}</h6>
-                    ${currentUser === 'admin' ? `<button onclick="deleteItem('${id}', '${item.name}')" class="btn text-danger btn-sm p-0"><i class="bi bi-trash"></i></button>` : ''}</div>
-                    <div class="d-flex justify-content-between align-items-center mt-3 p-2 bg-white rounded-3">${controlsHtml}</div>
-                </div>`;
+            card.innerHTML = `<div class="glass-panel stock-card shadow-sm"><div class="d-flex justify-content-between"><h6 class="fw-bold">${item.name}</h6>${currentUser === 'admin' ? `<button onclick="deleteItem('${id}', '${item.name}')" class="btn text-danger btn-sm p-0"><i class="bi bi-trash"></i></button>` : ''}</div><div class="d-flex justify-content-between align-items-center mt-3 p-2 bg-white rounded-3">${controlsHtml}</div></div>`;
             document.getElementById('itemsContainer').appendChild(card);
         }
 
@@ -697,14 +645,11 @@
             push(ref(db, 'history'), { type: 'manual', user: currentUser.toUpperCase(), desc: `${amt>0?'Sumó':'Restó'} ${Math.abs(amt)} a ${name}`, date: new Date().toLocaleString(), timestamp: Date.now() });
         };
 
-        // --- HISTORIALES ---
         function loadTallerHistory() {
             onValue(query(ref(db, 'taller_reports'), limitToLast(12)), snap => {
                 const list = document.getElementById('tallerHistoryList'); list.innerHTML = '';
                 const data = snap.val(); if(!data) return;
-                Object.values(data).sort((a,b) => b.timestamp - a.timestamp).forEach(i => {
-                    list.innerHTML += `<div class="history-box taller"><b>${i.operator}</b> - ${i.machine}<br><small>${i.date}</small></div>`;
-                });
+                Object.values(data).sort((a,b) => b.timestamp - a.timestamp).forEach(i => { list.innerHTML += `<div class="history-box taller"><b>${i.operator}</b> - ${i.machine}<br><small>${i.date}</small></div>`; });
             });
         }
 
@@ -712,9 +657,7 @@
             onValue(query(ref(db, 'history'), limitToLast(20)), snap => {
                 const cont = document.getElementById('historyContainer'); cont.innerHTML = '';
                 const data = snap.val(); if(!data) return;
-                Object.values(data).sort((a,b) => b.timestamp - a.timestamp).forEach(l => {
-                    cont.innerHTML += `<div class="history-box manual"><b>${l.user}</b>: ${l.desc}<br><small>${l.date}</small></div>`;
-                });
+                Object.values(data).sort((a,b) => b.timestamp - a.timestamp).forEach(l => { cont.innerHTML += `<div class="history-box manual"><b>${l.user}</b>: ${l.desc}<br><small>${l.date}</small></div>`; });
             });
         }
 
@@ -722,9 +665,7 @@
             onValue(ref(db, 'taller_reports'), snap => {
                 const tbody = document.getElementById('adminReportsTable'); tbody.innerHTML = '';
                 const data = snap.val(); if(!data) return;
-                Object.values(data).sort((a,b) => b.timestamp - a.timestamp).forEach(i => {
-                    tbody.innerHTML += `<tr><td>${i.date}</td><td>${i.operator}</td><td>${i.machine}</td><td>${i.activity}</td><td>${i.repuestos}</td><td>${i.observations || ''}</td></tr>`;
-                });
+                Object.values(data).sort((a,b) => b.timestamp - a.timestamp).forEach(i => { tbody.innerHTML += `<tr><td>${i.date}</td><td>${i.operator}</td><td>${i.machine}</td><td>${i.activity}</td><td>${i.repuestos}</td><td>${i.observations || ''}</td></tr>`; });
             });
         };
 
