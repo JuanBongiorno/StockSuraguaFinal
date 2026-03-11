@@ -40,7 +40,7 @@
         .chat-msg b { color: #007bff; display: block; font-size: 0.72rem; }
         .chat-msg.pedido-log { background: #fff4e5; border-left: 3px solid #ffa000; }
         #chat-input-area { display: flex; background: white; border-radius: 0 0 15px 15px; border-top: 1px solid #ddd; padding: 8px; }
-        #chat-toggle { width: 100%; border-radius: 20px; font-weight: bold; margin-top: 5px; }
+        #chat-toggle { width: 100%; border-radius: 20px; font-weight: bold; margin-top: 5px; transition: 0.3s; }
 
         /* Alerta de Pedidos */
         #pedido-alert-container { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); width: 90%; max-width: 600px; z-index: 2000; display: none; }
@@ -315,10 +315,18 @@
             unsubChat = onValue(query(ref(db, path), limitToLast(30)), (snap) => {
                 const box = document.getElementById('chat-box-messages'); box.innerHTML = '';
                 const data = snap.val();
-                if(data) Object.values(data).sort((a,b) => a.timestamp - b.timestamp).forEach(m => {
-                    const isPedido = m.text.includes("NUEVO PEDIDO");
-                    box.innerHTML += `<div class="chat-msg ${isPedido?'pedido-log':''}"><b>${m.user}</b>${m.text}</div>`;
-                });
+                if(data) {
+                    Object.values(data).sort((a,b) => a.timestamp - b.timestamp).forEach(m => {
+                        const isPedido = m.text.includes("NUEVO PEDIDO") || m.text.includes("🔔");
+                        box.innerHTML += `<div class="chat-msg ${isPedido?'pedido-log':''}"><b>${m.user}</b>${m.text}</div>`;
+                    });
+                    
+                    // MODIFICACIÓN: Alerta visual en botón de chat si hay mensajes nuevos y está cerrado
+                    const chatWin = document.getElementById('chat-window');
+                    if (chatWin.style.display !== 'flex') {
+                        document.getElementById('chat-toggle').classList.replace('btn-primary', 'btn-danger');
+                    }
+                }
                 box.scrollTop = box.scrollHeight;
             });
         }
@@ -332,12 +340,19 @@
 
         window.toggleChat = () => {
             const w = document.getElementById('chat-window');
+            const btn = document.getElementById('chat-toggle');
             w.style.display = w.style.display === 'flex' ? 'none' : 'flex';
+            // Al abrir el chat, restauramos el color azul del botón
+            if (w.style.display === 'flex') {
+                btn.classList.replace('btn-danger', 'btn-primary');
+            }
         };
 
         // --- PEDIDOS ---
         function listenForPedidos() {
-            if(!notifyUsers.includes(currentUser) && currentUser !== 'oficina') return;
+            // MODIFICACIÓN: No mostrar alerta amarilla a Oficina, Admin ni Planta
+            if(['oficina', 'admin', 'planta'].includes(currentUser)) return;
+            
             unsubAlerts = onValue(query(ref(db, 'pedidos_diarios'), limitToLast(1)), (snap) => {
                 const data = snap.val();
                 if(data) {
@@ -438,9 +453,13 @@
             };
 
             await push(ref(db, 'pedidos_diarios'), pedidoObj);
+            
             // REGISTRO EN CHAT PEDIDOS
             await push(ref(db, 'pedidos_chat'), { user: 'SISTEMA', text: `📢 NUEVO PEDIDO: ${resumen}. Obs: ${pedidoObj.obs}`, timestamp: Date.now() });
             
+            // MODIFICACIÓN: Envío automático a CHAT GLOBAL para Admin y Planta
+            await push(ref(db, 'chat'), { user: 'SISTEMA', text: `🔔 NUEVO PEDIDO CARGADO: ${resumen}`, timestamp: Date.now() });
+
             alert("Pedido enviado correctamente");
             selectedPedidosOficina = {};
             document.getElementById('pedidoObs').value = '';
